@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { ingestTikTok, isTikTokUrl } from "@/lib/ingest/tiktok";
+import { ingestInstagram, isInstagramUrl } from "@/lib/ingest/instagram";
 import { logEvent } from "@/lib/metrics/clickhouse";
 
 /**
- * TikTok URL → transcript, so a draft can be built FROM a real video.
+ * Instagram URL → transcript, so a draft can be built FROM a real reel.
  *
  *   POST /api/ingest  { url }  → { transcript, method, caption? }
  *
@@ -11,7 +11,7 @@ import { logEvent } from "@/lib/metrics/clickhouse";
  *   1. POST /api/ingest { url }                                   → { transcript }
  *   2. POST /api/draft  { source: "transcript", content: transcript }
  *
- * Apify subtitles → LLM fallback (TrueFoundry gateway) → mock. Never throws on a
+ * Apify caption → LLM analysis (TrueFoundry gateway) → mock. Never throws on a
  * missing key; logs one ClickHouse "ingest" row so the cost story covers scraping too.
  */
 export const maxDuration = 300; // Apify actor cold-starts can take ~30s
@@ -21,13 +21,13 @@ export async function POST(req: Request) {
   if (!url?.trim()) {
     return NextResponse.json({ error: "url is required" }, { status: 400 });
   }
-  if (!isTikTokUrl(url)) {
-    return NextResponse.json({ error: "only TikTok URLs are supported" }, { status: 400 });
+  if (!isInstagramUrl(url)) {
+    return NextResponse.json({ error: "only Instagram URLs are supported" }, { status: 400 });
   }
 
   const t0 = performance.now();
   try {
-    const result = await ingestTikTok(url);
+    const result = await ingestInstagram(url);
     await logEvent({
       phase: "ingest",
       provider: result.provider,

@@ -5,6 +5,17 @@ export type RemixAgentMessage = {
   content: string;
 };
 
+export type RemixAgentMode = "source" | "image" | "video";
+
+const MODE_STEER: Record<RemixAgentMode, string> = {
+  source:
+    "Focus: the source/transcript. Sharpen the render prompt and the hook from the imported video before any media is generated.",
+  image:
+    "Focus: a single still image. Tune framing, lighting, and composition; keep the locked character consistent. End with the image prompt to feed the image generator.",
+  video:
+    "Focus: one short clip (<=15s). Describe motion, camera, and pacing for the strongest beat. End with the video prompt to feed the video generator.",
+};
+
 export type RemixAgentResult = {
   output: string;
   model: string;
@@ -56,10 +67,16 @@ export function currentResponsesApiSettings(model = getAgentModel()) {
   };
 }
 
-export async function runRemixAgent(messages: RemixAgentMessage[]): Promise<RemixAgentResult> {
+export async function runRemixAgent(
+  messages: RemixAgentMessage[],
+  mode?: RemixAgentMode
+): Promise<RemixAgentResult> {
   const model = getAgentModel();
   const apiKey = getOpenAIApiKey();
-  const input = transcriptFromMessages(messages);
+  const steer = mode ? MODE_STEER[mode] : "";
+  const input = steer
+    ? `${steer}\n\n${transcriptFromMessages(messages)}`
+    : transcriptFromMessages(messages);
 
   if (!apiKey) {
     return {
