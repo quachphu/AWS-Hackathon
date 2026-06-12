@@ -27,7 +27,7 @@ export async function POST(req: Request) {
     eventType: "chat_turn",
     role: "assistant",
     model: result.model,
-    provider: "openai",
+    provider: result.provider,
     prompt,
     response: result.output,
     artifactType: "RemixPromptArtifact",
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     action: "remix_chat_response",
     mocked: result.mocked,
     live: !result.mocked,
-    metadata: { messageCount: messages.length },
+    metadata: { messageCount: messages.length, agentApiMode: result.agentApiMode },
   });
 
   return NextResponse.json(result);
