@@ -7,6 +7,7 @@ import {
   transcriptFromMessages,
   type RemixAgentMessage,
 } from "@/lib/openai/remix-agent";
+import { runInstagramAnalyticsAgent } from "@/lib/openai/instagram-analytics-agent";
 
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as {
@@ -16,6 +17,16 @@ export async function POST(req: Request) {
   const input = transcriptFromMessages(messages);
   const apiKey = getOpenAIApiKey();
   const model = getAgentModel();
+
+  if (isInstagramAnalyticsRequest(input)) {
+    try {
+      const analytics = await runInstagramAnalyticsAgent();
+      return openAIResponsesTextStream(analytics.program);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Instagram analytics failed";
+      return openAIResponsesTextStream(`${fallbackRemixResponse(input)}\n\nInstagram analytics note: ${detail}`);
+    }
+  }
 
   if (!apiKey) {
     return openAIResponsesTextStream(fallbackRemixResponse(input));
@@ -59,6 +70,17 @@ export async function POST(req: Request) {
     const detail = error instanceof Error ? error.message : "stream failed";
     return openAIResponsesTextStream(`${fallbackRemixResponse(input)}\n\nOpenAI stream note: ${detail}`);
   }
+}
+
+function isInstagramAnalyticsRequest(input: string) {
+  const normalized = input.toLowerCase();
+  return (
+    normalized.includes("instagram") &&
+    (normalized.includes("analytics") ||
+      normalized.includes("insight") ||
+      normalized.includes("composio") ||
+      normalized.includes("profile"))
+  );
 }
 
 function normalizeMessages(messages: Array<{ role?: string; content?: unknown }> | undefined): RemixAgentMessage[] {

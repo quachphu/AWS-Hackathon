@@ -7,6 +7,7 @@ import { ArtifactPortalTarget } from "@openuidev/react-ui";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ArrowUp,
+  BarChart3,
   Bot,
   ChevronDown,
   Download,
@@ -39,6 +40,15 @@ type RemixMessage = {
 
 type StudioView = "import" | "library" | "remix";
 
+type InstagramAnalyticsResponse = {
+  live: boolean;
+  mocked: boolean;
+  model: string;
+  summary: string;
+  program: string;
+  profile?: { username?: string };
+};
+
 const heroImageUrl =
   "https://images.unsplash.com/photo-1753545975907-dcb51efdd0d5?auto=format&fit=crop&w=1200&q=88";
 
@@ -63,6 +73,7 @@ export function JanusRemixStudio() {
   const [messages, setMessages] = useState<RemixMessage[]>(initialMessages);
   const [composer, setComposer] = useState("");
   const [running, setRunning] = useState(false);
+  const [analyticsProgram, setAnalyticsProgram] = useState<string | null>(null);
 
   useEffect(() => {
     if (currentView !== "remix") return;
@@ -91,6 +102,31 @@ export function JanusRemixStudio() {
     setRunning(true);
 
     try {
+      if (isInstagramAnalyticsPrompt(trimmed)) {
+        const res = await fetch("/api/agent/instagram-analytics", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+
+        if (!res.ok) throw new Error(`Instagram analytics failed (${res.status})`);
+
+        const data = (await res.json()) as InstagramAnalyticsResponse;
+        setAnalyticsProgram(data.program);
+        setMessages((current) => [
+          ...current,
+          {
+            id: createClientId(),
+            role: "assistant",
+            content: `${data.live ? "Live" : "Mock"} Instagram analytics pulled via Composio MCP for @${
+              data.profile?.username ?? "instagram"
+            }. ${data.summary}`,
+            model: data.model,
+            mocked: data.mocked || !data.live,
+          },
+        ]);
+        return;
+      }
+
       const res = await fetch("/api/agent/remix", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -156,12 +192,24 @@ export function JanusRemixStudio() {
             <RemixChatPanel
               messages={messages}
               running={running}
+              analyticsProgram={analyticsProgram}
               onSend={(prompt) => void sendPrompt(prompt)}
             />
           </>
         )}
       </div>
     </main>
+  );
+}
+
+function isInstagramAnalyticsPrompt(prompt: string) {
+  const normalized = prompt.toLowerCase();
+  return (
+    normalized.includes("instagram") &&
+    (normalized.includes("analytics") ||
+      normalized.includes("insight") ||
+      normalized.includes("composio") ||
+      normalized.includes("profile"))
   );
 }
 
@@ -445,10 +493,12 @@ function IconButton({ label, icon: Icon }: { label: string; icon: LucideIcon }) 
 function RemixChatPanel({
   messages,
   running,
+  analyticsProgram,
   onSend,
 }: {
   messages: RemixMessage[];
   running: boolean;
+  analyticsProgram: string | null;
   onSend: (prompt: string) => void;
 }) {
   const [quickPrompt, setQuickPrompt] = useState("");
@@ -489,10 +539,14 @@ function RemixChatPanel({
         {messages.map((message, index) => (
           <ChatBubble key={message.id} message={message} first={index === 0} />
         ))}
-        <ChatProvider apiUrl="/api/agent/chat" streamProtocol={openAIResponsesAdapter()}>
+        <ChatProvider
+          key={analyticsProgram ? "instagram-analytics-artifact" : "remix-prompt-artifact"}
+          apiUrl="/api/agent/chat"
+          streamProtocol={openAIResponsesAdapter()}
+        >
           <Renderer
             library={janusOpenUiLibrary}
-            response={JANUS_REMIX_ARTIFACT_PROGRAM}
+            response={analyticsProgram ?? JANUS_REMIX_ARTIFACT_PROGRAM}
             onError={setArtifactErrors}
           />
           <ArtifactPortalTarget />
@@ -508,6 +562,15 @@ function RemixChatPanel({
       </div>
 
       <div className="border-t border-[#ebe6e0] p-3">
+        <button
+          type="button"
+          onClick={() => onSend("Pull live Instagram analytics from Composio and render the OpenUI artifact.")}
+          disabled={running}
+          className="mb-2 inline-flex h-8 items-center gap-2 rounded-md border border-[#e0a371] bg-[#fff3ea] px-2 text-xs font-semibold text-[#b95c1f] hover:bg-white disabled:opacity-45"
+        >
+          <BarChart3 aria-hidden className="h-4 w-4" />
+          Live IG analytics
+        </button>
         <div className="flex items-center gap-2 rounded-lg border border-[#ded8d2] bg-[#fbfaf8] px-3 py-2">
           <input
             value={quickPrompt}
