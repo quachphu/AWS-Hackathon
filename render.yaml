@@ -9,7 +9,15 @@ services:
     startCommand: npm run start
     envVars:
       - key: NODE_VERSION
-        value: 20.14.0
+        value: 22.22.2
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPEN_AI_API
+        sync: false
+      - key: OPENAI_AGENT_MODEL
+        value: gpt-5.4-mini
+      - key: OPENAI_BASE_URL
+        sync: false
       - key: TRUEFOUNDRY_GATEWAY_URL
         sync: false
       - key: TRUEFOUNDRY_API_KEY
@@ -29,4 +37,6 @@ services:
       - key: BLOB_READ_WRITE_TOKEN
         sync: false
       - key: COMPOSIO_API_KEY
+        sync: false
+      - key: COMPOSIO_API
         sync: false
