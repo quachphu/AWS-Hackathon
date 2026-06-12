@@ -24,20 +24,24 @@ import {
   SlidersHorizontal,
   Sparkles,
   Star,
+  Trash2,
   Upload,
   Video,
   type LucideIcon,
 } from "lucide-react";
 import { VISUAL_REMIX_ARTIFACT_PROGRAM } from "@/lib/openui/visual-programs";
 import { visualOpenUiLibrary } from "@/components/openui/visual-openui-library";
+import {
+  createProject,
+  deleteProject,
+  getProject,
+  listProjects,
+  saveProject,
+  type RemixMessage,
+  type RemixProject,
+} from "@/lib/remix/store";
 
-type RemixMessage = {
-  id: string;
-  role: "assistant" | "user";
-  content: string;
-  mocked?: boolean;
-  model?: string;
-};
+type RemixTab = "source" | "image" | "video";
 
 type StudioView = "import" | "library" | "remix" | "analytics";
 
@@ -81,8 +85,6 @@ type DatasetExportResponse = {
   jsonl: string;
 };
 
-const heroImageUrl =
-  "https://images.unsplash.com/photo-1753545975907-dcb51efdd0d5?auto=format&fit=crop&w=1200&q=88";
 
 const initialMessages: RemixMessage[] = [
   {
@@ -101,27 +103,48 @@ const initialMessages: RemixMessage[] = [
 
 export function VisualRemixStudio() {
   const pathname = usePathname();
+  const router = useRouter();
   const currentView = getStudioView(pathname);
+  const projectId = getProjectId(pathname);
   const [messages, setMessages] = useState<RemixMessage[]>(initialMessages);
   const [composer, setComposer] = useState("");
   const [running, setRunning] = useState(false);
   const [analyticsProgram, setAnalyticsProgram] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<RemixTab>("source");
+  // The remix project loaded from the library (null on the blank "/remix" view).
+  const [project, setProject] = useState<RemixProject | null>(null);
 
+  // Load a saved remix project from the library when the route carries an id.
   useEffect(() => {
-    if (currentView !== "remix") return;
+    if (!projectId) {
+      setProject(null);
+      return;
+    }
+    const loaded = getProject(projectId);
+    if (!loaded) {
+      setProject(null);
+      return;
+    }
+    setProject(loaded);
+    setMessages(loaded.messages);
+    setActiveTab("source");
 
-    const transcript = window.sessionStorage.getItem("visual-import-transcript");
-    const importedLink = window.sessionStorage.getItem("visual-import-link");
-    if (!transcript && !importedLink) return;
+    // Pre-fill the composer the first time a project is opened (no user turns yet).
+    const hasUserTurn = loaded.messages.some((message) => message.role === "user");
+    if (!hasUserTurn) {
+      setComposer(
+        loaded.transcript
+          ? `Remix this imported video into a short-form ad.\n\nTranscript:\n${loaded.transcript}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Visual-style remix prompt.`
+          : `Remix this imported video source: ${loaded.importedLink}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Visual-style remix prompt for a short-form ad.`
+      );
+    }
+  }, [projectId]);
 
-    window.sessionStorage.removeItem("visual-import-transcript");
-    window.sessionStorage.removeItem("visual-import-link");
-    setComposer(
-      transcript
-        ? `Remix this imported video into a short-form ad.\n\nTranscript:\n${transcript}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Visual-style remix prompt.`
-        : `Remix this imported video source: ${importedLink}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Visual-style remix prompt for a short-form ad.`
-    );
-  }, [currentView]);
+  // Persist the conversation back to the library as the user works.
+  useEffect(() => {
+    if (!project || project.id !== projectId) return;
+    saveProject({ ...project, messages });
+  }, [messages, project, projectId]);
 
   async function sendPrompt(prompt: string) {
     const trimmed = prompt.trim();
@@ -243,8 +266,14 @@ export function VisualRemixStudio() {
         ) : (
           <>
             <section className="relative min-h-screen min-w-0 px-4 py-5 pb-5 lg:px-8 lg:pr-[410px]">
-              <RemixHeader />
-              <MediaStage />
+              <RemixHeader
+                title={project?.title ?? DEMO_TITLE}
+                subtitle={project?.sourceLabel ?? DEMO_SUBTITLE}
+                activeTab={activeTab}
+                onTabChange={setActiveTab}
+                onBack={() => router.push("/library")}
+              />
+              <MediaStage activeTab={activeTab} project={project} />
               <Composer
                 value={composer}
                 running={running}
@@ -293,12 +322,23 @@ function isTrainingPipelinePrompt(prompt: string) {
   );
 }
 
+// Fallback header copy for the blank "/remix" view (no project loaded yet).
+const DEMO_TITLE =
+  "@Kai Cenat this is my Audition. Teacher, student, lunch lady just lmk and me and";
+const DEMO_SUBTITLE = "tiktok - @Kai Cenat this is my Audition. Teacher, student, lunch lady";
+
 function getStudioView(pathname: string | null): StudioView {
   if (pathname?.startsWith("/import")) return "import";
   if (pathname?.startsWith("/library")) return "library";
   if (pathname?.startsWith("/analytics")) return "analytics";
   if (pathname?.startsWith("/remix")) return "remix";
   return "remix";
+}
+
+// "/remix/<id>" → the project id; "/remix" (blank) → null.
+function getProjectId(pathname: string | null): string | null {
+  const match = pathname?.match(/^\/remix\/([^/]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 function ImportView() {
@@ -311,6 +351,8 @@ function ImportView() {
     if (!trimmed || importing) return;
 
     setImporting(true);
+    let transcript = "";
+    let caption: string | undefined;
     try {
       // Scrape the link → real transcript (Apify subtitles → gateway LLM → mock).
       const res = await fetch("/api/ingest", {
@@ -319,18 +361,18 @@ function ImportView() {
         body: JSON.stringify({ url: trimmed }),
       });
       if (res.ok) {
-        const { transcript } = (await res.json()) as { transcript: string };
-        window.sessionStorage.setItem("visual-import-transcript", transcript);
-      } else {
-        // Non-TikTok or scrape failure — fall back to handing the raw link downstream.
-        window.sessionStorage.removeItem("visual-import-transcript");
+        const data = (await res.json()) as { transcript?: string; caption?: string };
+        transcript = data.transcript ?? "";
+        caption = data.caption;
       }
     } catch {
-      window.sessionStorage.removeItem("visual-import-transcript");
+      // Scrape failure — still create a project from the raw link.
     } finally {
-      window.sessionStorage.setItem("visual-import-link", trimmed);
+      // Auto-create a remix project and open its editor. This is the library entry.
+      const project = createProject({ importedLink: trimmed, transcript, caption });
+      saveProject(project);
       setImporting(false);
-      router.push("/remix");
+      router.push(`/remix/${project.id}`);
     }
   }
 
@@ -388,27 +430,130 @@ function ImportView() {
 }
 
 function LibraryView() {
+  const router = useRouter();
+  const [projects, setProjects] = useState<RemixProject[]>([]);
+
+  // localStorage is client-only — read after mount to avoid hydration mismatch.
+  useEffect(() => {
+    setProjects(listProjects());
+  }, []);
+
+  function removeProject(id: string) {
+    deleteProject(id);
+    setProjects(listProjects());
+  }
+
   return (
     <section className="min-h-screen min-w-0 px-4 py-10 lg:px-8">
       <div className="mx-auto w-full max-w-[1210px]">
-        <p className="text-sm text-[#81776f]">Workspace</p>
-        <h1 className="text-3xl font-semibold leading-tight">Library</h1>
-        <p className="mt-2 max-w-[940px] text-sm text-[#81776f]">
-          Saved character, character sheet, scene, video, and persona references. Attach them to any chat to keep
-          identity and look consistent across sessions.
-        </p>
-
-        <div className="mt-6 flex min-h-[165px] flex-col items-center justify-center rounded-xl border border-[#e0dbd4] bg-white px-8 text-center shadow-[0_8px_24px_rgba(35,28,22,0.12)]">
-          <Library aria-hidden className="h-9 w-9 text-[#c95f14]" />
-          <p className="mt-5 max-w-[880px] text-sm text-[#81776f]">
-            No saved references yet. In a Sandbox chat with Director Mode on, click Save to Library on a rendered
-            image to lock it in as a Character, Character Sheet, or Scene - or save a video render to keep the clip
-            alongside its spec.
-          </p>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-sm text-[#81776f]">Workspace</p>
+            <h1 className="text-3xl font-semibold leading-tight">All remixes</h1>
+            <p className="mt-2 max-w-[940px] text-sm text-[#81776f]">
+              Every video you&apos;ve imported and remixed. Open one to keep editing, or import a new source.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => router.push("/import")}
+            className="inline-flex items-center gap-2 rounded-md bg-[#c95f14] px-3 py-2 text-sm font-semibold text-white hover:bg-[#ad500f]"
+          >
+            <Upload aria-hidden className="h-4 w-4" />
+            Import a video
+          </button>
         </div>
+
+        {projects.length === 0 ? (
+          <div className="mt-6 flex min-h-[165px] flex-col items-center justify-center rounded-xl border border-[#e0dbd4] bg-white px-8 text-center shadow-[0_8px_24px_rgba(35,28,22,0.12)]">
+            <Library aria-hidden className="h-9 w-9 text-[#c95f14]" />
+            <p className="mt-5 max-w-[880px] text-sm text-[#81776f]">
+              No remixes yet. Import a video to scrape its transcript and start a new remix — it&apos;ll show up
+              here so you can come back to it.
+            </p>
+          </div>
+        ) : (
+          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {projects.map((project) => (
+              <RemixCard
+                key={project.id}
+                project={project}
+                onOpen={() => router.push(`/remix/${project.id}`)}
+                onDelete={() => removeProject(project.id)}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
+}
+
+function RemixCard({
+  project,
+  onOpen,
+  onDelete,
+}: {
+  project: RemixProject;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className="group flex cursor-pointer flex-col rounded-xl border border-[#e0dbd4] bg-white text-left shadow-[0_8px_24px_rgba(35,28,22,0.08)] transition hover:border-[#d2a988] hover:shadow-[0_12px_30px_rgba(35,28,22,0.14)]"
+    >
+      <div className="flex aspect-video items-center justify-center overflow-hidden rounded-t-xl bg-[#ece9e6]">
+        {project.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={project.imageUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <Sparkles aria-hidden className="h-8 w-8 text-[#c0b6ad]" />
+        )}
+      </div>
+      <div className="flex flex-1 flex-col gap-2 p-4">
+        <span className="inline-flex w-fit items-center rounded-full bg-[#fff4ea] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#c2682b]">
+          {project.platform}
+        </span>
+        <h2 className="line-clamp-2 text-sm font-semibold leading-snug">{project.title}</h2>
+        <div className="mt-auto flex items-center justify-between text-xs text-[#9a8f86]">
+          <span>{formatTimestamp(project.updatedAt)}</span>
+          <button
+            type="button"
+            aria-label="Delete remix"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete();
+            }}
+            className="rounded-md p-1 text-[#b3a89f] opacity-0 transition hover:bg-[#f4efe9] hover:text-[#c0492b] group-hover:opacity-100"
+          >
+            <Trash2 aria-hidden className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatTimestamp(ms: number): string {
+  try {
+    return new Date(ms).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
 }
 
 function AnalyticsView() {
@@ -620,7 +765,7 @@ function StudioSidebar({ currentView }: { currentView: StudioView }) {
           onClick={() => router.push("/import")}
         />
         <SidebarNavItem
-          label="Library"
+          label="Remixes"
           icon={Library}
           active={currentView === "library"}
           onClick={() => router.push("/library")}
@@ -689,20 +834,34 @@ function SidebarNavItem({
   );
 }
 
-function RemixHeader() {
+function RemixHeader({
+  title,
+  subtitle,
+  activeTab,
+  onTabChange,
+  onBack,
+}: {
+  title: string;
+  subtitle: string;
+  activeTab: RemixTab;
+  onTabChange: (tab: RemixTab) => void;
+  onBack: () => void;
+}) {
   return (
     <header className="mx-auto w-full max-w-[1050px]">
-      <button type="button" className="mb-3 text-sm text-[#746a62] hover:text-[#211c18]">
+      <button
+        type="button"
+        onClick={onBack}
+        className="mb-3 text-sm text-[#746a62] hover:text-[#211c18]"
+      >
         &lt; All remixes
       </button>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="max-w-[900px] text-2xl font-semibold leading-tight md:text-3xl">
-            @Kai Cenat this is my Audition. Teacher, student, lunch lady just lmk and me and
+            {title}
           </h1>
-          <p className="mt-1 text-xs text-[#81776f]">
-            tiktok - @Kai Cenat this is my Audition. Teacher, student, lunch lady
-          </p>
+          <p className="mt-1 text-xs text-[#81776f]">{subtitle}</p>
         </div>
         <div className="flex items-center gap-2 rounded-md border border-[#e3b58e] bg-[#fff4ea] px-3 py-1.5 text-[10px] font-semibold uppercase text-[#c2682b]">
           <Lock aria-hidden className="h-3.5 w-3.5" />
@@ -711,26 +870,63 @@ function RemixHeader() {
       </div>
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex rounded-lg bg-[#ece9e6] p-1">
-          <TabButton icon={FileText} label="Source" active />
-          <TabButton icon={ImageIcon} label="Image" />
-          <TabButton icon={Video} label="Video" />
+          <TabButton
+            icon={FileText}
+            label="Source"
+            active={activeTab === "source"}
+            onClick={() => onTabChange("source")}
+          />
+          <TabButton
+            icon={ImageIcon}
+            label="Image"
+            active={activeTab === "image"}
+            onClick={() => onTabChange("image")}
+          />
+          <TabButton
+            icon={Video}
+            label="Video"
+            active={activeTab === "video"}
+            onClick={() => onTabChange("video")}
+          />
         </div>
-        <button
-          type="button"
-          className="inline-flex items-center gap-2 rounded-md bg-[#c95f14] px-3 py-2 text-sm font-semibold text-white hover:bg-[#ad500f]"
-        >
-          <Sparkles aria-hidden className="h-4 w-4" />
-          Generate image
-        </button>
+        {activeTab === "source" ? null : (
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 rounded-md bg-[#c95f14] px-3 py-2 text-sm font-semibold text-white hover:bg-[#ad500f]"
+          >
+            {activeTab === "video" ? (
+              <>
+                <Video aria-hidden className="h-4 w-4" />
+                Generate video
+              </>
+            ) : (
+              <>
+                <Sparkles aria-hidden className="h-4 w-4" />
+                Generate image
+              </>
+            )}
+          </button>
+        )}
       </div>
     </header>
   );
 }
 
-function TabButton({ icon: Icon, label, active }: { icon: LucideIcon; label: string; active?: boolean }) {
+function TabButton({
+  icon: Icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
   return (
     <button
       type="button"
+      onClick={onClick}
       className={[
         "inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-semibold",
         active ? "bg-white text-[#211c18] shadow-sm" : "text-[#726860] hover:bg-white/70",
@@ -742,31 +938,127 @@ function TabButton({ icon: Icon, label, active }: { icon: LucideIcon; label: str
   );
 }
 
-function MediaStage() {
+function MediaStage({
+  activeTab,
+  project,
+}: {
+  activeTab: RemixTab;
+  project: RemixProject | null;
+}) {
+  const imageUrl = project?.imageUrl;
+  const showFrameControls = activeTab === "image" && Boolean(imageUrl);
+
   return (
     <section className="mx-auto mt-4 w-full max-w-[1050px]">
       <div className="relative flex min-h-[560px] items-center justify-center bg-[#ebe8e4] px-4 py-5">
-        <div className="absolute right-4 top-4 z-10 flex gap-2">
-          <IconButton label="Favorite" icon={Star} />
-          <IconButton label="Download" icon={Download} />
-        </div>
-        <div
-          role="img"
-          aria-label="Creator leaning over a laptop in a production room"
-          className="relative aspect-[3/4] w-full max-w-[640px] overflow-hidden bg-[#1d2c2b] bg-cover bg-center shadow-[0_24px_70px_rgba(30,25,20,0.18)]"
-          style={{ backgroundImage: `url(${heroImageUrl})` }}
-        >
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-4 text-white">
-            <div className="flex items-center justify-between gap-3">
-              <p className="max-w-md text-sm font-semibold">
-                Locked character remix frame - hackathon breakthrough
-              </p>
-              <span className="rounded-md bg-white/15 px-2 py-1 text-xs">9:16</span>
-            </div>
+        {showFrameControls ? (
+          <div className="absolute right-4 top-4 z-10 flex gap-2">
+            <IconButton label="Favorite" icon={Star} />
+            <IconButton label="Download" icon={Download} />
           </div>
-        </div>
+        ) : null}
+        {activeTab === "source" ? (
+          <SourceStage project={project} />
+        ) : activeTab === "video" ? (
+          <VideoStage videoUrl={project?.videoUrl} />
+        ) : (
+          <ImageStage imageUrl={imageUrl} />
+        )}
       </div>
     </section>
+  );
+}
+
+function SourceStage({ project }: { project: RemixProject | null }) {
+  const title = project?.title ?? DEMO_TITLE;
+  const platform = project?.platform ?? "tiktok";
+  const transcript = project?.transcript?.trim();
+  const importedLink = project?.importedLink;
+
+  return (
+    <div className="w-full max-w-[640px] rounded-lg border border-[#ddd7d0] bg-white p-6 shadow-[0_24px_70px_rgba(30,25,20,0.12)]">
+      <div className="flex items-center gap-2 text-[#9c4f24]">
+        <FileText aria-hidden className="h-4 w-4" />
+        <p className="text-xs font-semibold uppercase tracking-wide">Source transcript</p>
+      </div>
+      <h3 className="mt-3 text-base font-semibold leading-snug text-[#211c18]">{title}</h3>
+      {importedLink ? (
+        <a
+          href={importedLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 inline-block break-all text-xs text-[#9c4f24] hover:underline"
+        >
+          {importedLink}
+        </a>
+      ) : null}
+
+      {transcript ? (
+        <p className="mt-4 max-h-[340px] overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[#5c554f]">
+          {transcript}
+        </p>
+      ) : (
+        <p className="mt-4 text-sm leading-6 text-[#857a70]">
+          No transcript was captured for this {platform} source. Refine the source in the chat to shape the render
+          prompt before moving to the Image and Video tabs.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ImageStage({ imageUrl }: { imageUrl: string | undefined }) {
+  if (!imageUrl) {
+    return (
+      <div className="flex aspect-[3/4] w-full max-w-[640px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-[#cfc7be] bg-[#f3f0ec] text-center text-[#857a70]">
+        <ImageIcon aria-hidden className="h-8 w-8 text-[#c0b6ad]" />
+        <p className="text-sm font-semibold text-[#5c554f]">No image yet</p>
+        <p className="max-w-xs text-xs">
+          Tune the prompt in the chat, then hit Generate image to render the first still for this remix.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      role="img"
+      aria-label="Generated remix frame"
+      className="relative aspect-[3/4] w-full max-w-[640px] overflow-hidden bg-[#1d2c2b] bg-cover bg-center shadow-[0_24px_70px_rgba(30,25,20,0.18)]"
+      style={{ backgroundImage: `url(${imageUrl})` }}
+    >
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-4 text-white">
+        <div className="flex items-center justify-between gap-3">
+          <p className="max-w-md text-sm font-semibold">Generated remix frame</p>
+          <span className="rounded-md bg-white/15 px-2 py-1 text-xs">9:16</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VideoStage({ videoUrl }: { videoUrl: string | undefined }) {
+  if (videoUrl) {
+    return (
+      <div className="relative aspect-[3/4] w-full max-w-[640px] overflow-hidden bg-black shadow-[0_24px_70px_rgba(30,25,20,0.18)]">
+        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+        <video src={videoUrl} controls playsInline className="h-full w-full object-contain" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative aspect-[3/4] w-full max-w-[640px] overflow-hidden rounded-lg bg-[#13100d] shadow-[0_24px_70px_rgba(30,25,20,0.18)]">
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white">
+        <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur">
+          <Play aria-hidden className="h-7 w-7" />
+        </span>
+        <p className="text-sm font-semibold">Video render slot</p>
+        <p className="max-w-xs text-center text-xs text-white/70">
+          Generate an image first, then render a single short clip from this remix.
+        </p>
+      </div>
+    </div>
   );
 }
 
