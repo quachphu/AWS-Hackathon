@@ -9,7 +9,7 @@ import { createClient } from "@clickhouse/client";
  */
 
 export type GenEvent = {
-  phase: "draft" | "image" | "video" | "publish";
+  phase: "draft" | "image" | "video" | "publish" | "ingest";
   model?: string; // base vs pioneer id — the chart splits cost on this
   provider?: string; // truefoundry | replicate | fal | composio
   draft_id?: string;
