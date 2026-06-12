@@ -1,5 +1,6 @@
 import { generateObject } from "ai";
 import { draftModel, PIONEER_MODEL, isGatewayConfigured } from "@/lib/gateway/client";
+import { MOCK_FALLBACK_MODEL } from "@/lib/gateway/models";
 import { draftContentSchema, type Draft } from "@/lib/schema";
 import { mockDraft } from "@/lib/mock";
 
@@ -28,7 +29,7 @@ export async function generateDraft(input: DraftInput): Promise<Draft> {
   // Mock-first: the route works before anyone has keys. Loud, so misconfig can't hide.
   if (!isGatewayConfigured) {
     console.warn("[draft] TRUEFOUNDRY_* env missing — serving mockDraft");
-    return { ...mockDraft, meta: { model: "mock-fallback", source: input.source } };
+    return { ...mockDraft, meta: { model: MOCK_FALLBACK_MODEL, source: input.source } };
   }
 
   const { object } = await generateObject({
