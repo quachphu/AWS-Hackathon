@@ -42,3 +42,7 @@ services:
         sync: false
       - key: COMPOSIO_API
         sync: false
+      - key: COMPOSIO_USER_ID
+        sync: false
+      - key: INSTAGRAM_IG_USER_ID
+        sync: false

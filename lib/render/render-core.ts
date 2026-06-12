@@ -1,6 +1,6 @@
 // render-core.ts — fire-and-poll render core for the hackathon build.
 //
-// Carved out of JanusLabs lib/render/ (queue.ts was 1,355 lines; this is the
+// Carved out of VisualLabs lib/render/ (queue.ts was 1,355 lines; this is the
 // ~5% that earns demo points). Everything cut per CLAUDE.md: chained-extension
 // for >15s clips, MAX-tier gating, the refund/error-category ledger, recovery,
 // productions/cast anchoring, credits, quota, DB rows, Sentry.
@@ -30,7 +30,7 @@ const IMAGE_COST_USD = 0.03; // Seedream 4.5, 2K, per image
 const VIDEO_COST_USD_PER_SEC = 0.12; // Seedance 2.0, 720p, per second
 
 // ---------------------------------------------------------------------------
-// Cloudinary mirror — replaces the JanusLabs Blob mirror (we host on Render,
+// Cloudinary mirror — replaces the VisualLabs Blob mirror (we host on Render,
 // not Vercel). Provider artifact URLs (replicate.delivery / fal.media) expire
 // in minutes; this re-hosts them on Cloudinary's CDN so a returned URL is safe
 // to store and show. Cloudinary fetches the provider URL server-side, so we

@@ -2,7 +2,8 @@
 
 import { openAIMessageFormat, openAIResponsesAdapter } from "@openuidev/react-headless";
 import { FullScreen } from "@openuidev/react-ui";
-import { Image as ImageIcon, Sparkles, Video } from "lucide-react";
+import { BarChart3, Image as ImageIcon, Sparkles, Video } from "lucide-react";
+import { visualOpenUiLibrary } from "@/components/openui/visual-openui-library";
 
 export function OpenUIAgentFullscreen() {
   return (
@@ -13,6 +14,7 @@ export function OpenUIAgentFullscreen() {
         showAssistantLogo={false}
         streamProtocol={openAIResponsesAdapter()}
         messageFormat={openAIMessageFormat}
+        componentLibrary={visualOpenUiLibrary}
         welcomeMessage={{
           title: "Harness Remix Agent",
           description: "OpenUI fullscreen chat for prompt, analytics, and generative UI passes.",
@@ -33,6 +35,17 @@ export function OpenUIAgentFullscreen() {
             {
               displayText: "Score TikTok fit",
               prompt: "Score the remix for TikTok fit, hook strength, and publish risk.",
+              icon: <Sparkles className="h-4 w-4" />,
+            },
+            {
+              displayText: "Instagram analytics",
+              prompt: "Pull live Instagram analytics from Composio and render the OpenUI artifact.",
+              icon: <BarChart3 className="h-4 w-4" />,
+            },
+            {
+              displayText: "Fastino dataset",
+              prompt:
+                "Show the ClickHouse chat history export and mock Fastino Pioneer training pipeline as an OpenUI artifact.",
               icon: <Sparkles className="h-4 w-4" />,
             },
           ],

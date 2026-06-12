@@ -1,5 +1,5 @@
-import { JanusRemixStudio } from "@/components/openui/JanusRemixStudio";
+import { HackathonLandingPage } from "@/components/landing/HackathonLandingPage";
 
 export default function Home() {
-  return <JanusRemixStudio />;
+  return <HackathonLandingPage />;
 }
