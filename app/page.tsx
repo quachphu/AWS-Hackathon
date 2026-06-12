@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Draft } from "@/lib/schema";
-import { Storyboard, type RenderState } from "@/components/Storyboard";
+import { Storyboard, type RenderState, type PublishState } from "@/components/Storyboard";
 
 /**
  * C's lane — others integrate INTO this via components, not by editing it (CONTRIBUTION.md).
@@ -21,6 +21,7 @@ export default function Home() {
     videoStatus: "idle",
   });
   const [error, setError] = useState<string | null>(null);
+  const [publishState, setPublishState] = useState<PublishState>({ status: "idle" });
 
   async function handleDraft() {
     if (!topic.trim() || drafting) return;
@@ -58,6 +59,33 @@ export default function Home() {
         setRender((r) => ({ ...r, stills: { ...r.stills, [shot.id]: url } }));
       })
     );
+  }
+
+  async function handlePublish(targets: ("tiktok" | "instagram")[]) {
+    if (!draft || publishState.status === "publishing") return;
+    setPublishState({ status: "publishing" });
+    try {
+      const firstStill = render.stills[draft.shots[0]?.id] ?? null;
+      const res = await fetch("/api/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: draft.title,
+          hook: draft.hook,
+          cta: draft.cta,
+          videoUrl: render.videoUrl,
+          imageUrl: firstStill,
+          targets,
+        }),
+      });
+      const data = await res.json();
+      setPublishState({
+        status: data.ok ? "done" : "error",
+        detail: data.detail ?? data.error,
+      });
+    } catch (e) {
+      setPublishState({ status: "error", detail: (e as Error).message });
+    }
   }
 
   async function handleRenderVideo() {
@@ -116,7 +144,13 @@ export default function Home() {
       {error && <p className="text-sm text-red-400">{error}</p>}
 
       {draft ? (
-        <Storyboard draft={draft} render={render} onRenderVideo={handleRenderVideo} />
+        <Storyboard
+          draft={draft}
+          render={render}
+          onRenderVideo={handleRenderVideo}
+          publishState={publishState}
+          onPublish={handlePublish}
+        />
       ) : (
         <p className="text-sm text-neutral-600">
           {drafting ? "Drafting through the gateway…" : "No draft yet — enter a topic above."}

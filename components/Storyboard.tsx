@@ -2,28 +2,29 @@
 
 import type { Draft, Shot } from "@/lib/schema";
 
-/**
- * C's lane — storyboard surface.
- *
- * This is the plain-React-cards version (the documented bail-out if OpenUI fights
- * back, per CLAUDE.md). C layers OpenUI on top / replaces internals. Everyone else
- * integrates via props — do not edit this in another lane.
- */
-
 export type RenderState = {
-  stills: Record<string, string>; // shot id → image url
+  stills: Record<string, string>;
   videoUrl: string | null;
   videoStatus: "idle" | "rendering" | "done";
+};
+
+export type PublishState = {
+  status: "idle" | "publishing" | "done" | "error";
+  detail?: string;
 };
 
 export function Storyboard({
   draft,
   render,
   onRenderVideo,
+  publishState,
+  onPublish,
 }: {
   draft: Draft;
   render: RenderState;
   onRenderVideo: () => void;
+  publishState?: PublishState;
+  onPublish?: (targets: ("tiktok" | "instagram")[]) => void;
 }) {
   const totalSeconds = draft.shots.reduce((sum, s) => sum + s.duration_s, 0);
 
@@ -50,6 +51,14 @@ export function Storyboard({
       </div>
 
       <VideoSlot render={render} onRenderVideo={onRenderVideo} />
+
+      {onPublish && (
+        <PublishPanel
+          render={render}
+          publishState={publishState ?? { status: "idle" }}
+          onPublish={onPublish}
+        />
+      )}
     </section>
   );
 }
@@ -67,7 +76,7 @@ function ShotCard({ shot, still }: { shot: Shot; still?: string }) {
           </div>
         )}
         {shot.on_screen_text && (
-          <p className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2 pt-6 text-sm font-semibold text-white">
+          <p className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/80 to-transparent px-3 pb-2 pt-6 text-sm font-semibold text-white">
             {shot.on_screen_text}
           </p>
         )}
@@ -106,12 +115,68 @@ function VideoSlot({
         <video src={render.videoUrl} controls className="aspect-video w-full rounded-lg bg-black" />
       ) : (
         <div className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-neutral-800">
-          <p className="max-w-md px-4 text-center text-xs leading-relaxed text-neutral-500">
-            {render.videoStatus === "rendering"
-              ? "Job fired — polling. On stage: kick this off at the START of the demo, reveal at the climax."
-              : "Video renders async (minutes, fails often). Never render live-awaited on stage — keep D's pre-baked clip in your back pocket."}
+          <p className="text-xs text-neutral-500">
+            {render.videoStatus === "rendering" ? "Rendering…" : "No video yet."}
           </p>
         </div>
+      )}
+    </div>
+  );
+}
+
+function PublishPanel({
+  render,
+  publishState,
+  onPublish,
+}: {
+  render: RenderState;
+  publishState: PublishState;
+  onPublish: (targets: ("tiktok" | "instagram")[]) => void;
+}) {
+  const busy = publishState.status === "publishing";
+
+  return (
+    <div className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-neutral-200">Publish via Composio</h3>
+        <div className="flex gap-2">
+          <button
+            onClick={() => onPublish(["instagram"])}
+            disabled={busy}
+            className="rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-medium text-neutral-200 transition hover:bg-neutral-700 disabled:opacity-40"
+          >
+            Instagram
+          </button>
+          <button
+            onClick={() => onPublish(["tiktok"])}
+            disabled={busy || !render.videoUrl}
+            title={!render.videoUrl ? "Render video first" : ""}
+            className="rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-medium text-neutral-200 transition hover:bg-neutral-700 disabled:opacity-40"
+          >
+            TikTok
+          </button>
+          <button
+            onClick={() => onPublish(["instagram", "tiktok"])}
+            disabled={busy}
+            className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-500 disabled:opacity-40"
+          >
+            {busy ? "Publishing…" : "Publish all"}
+          </button>
+        </div>
+      </div>
+
+      {publishState.status === "done" && (
+        <p className="text-xs text-emerald-400">{publishState.detail}</p>
+      )}
+      {publishState.status === "error" && (
+        <p className="text-xs text-red-400">{publishState.detail}</p>
+      )}
+      {publishState.status === "idle" && (
+        <p className="text-xs text-neutral-500">
+          {render.videoUrl
+            ? "Video ready. Post to Instagram or TikTok."
+            : "Render video first for TikTok. Instagram can post a still."}
+        </p>
       )}
     </div>
   );

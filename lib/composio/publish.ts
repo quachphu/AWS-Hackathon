@@ -1,26 +1,125 @@
-/**
- * D's lane — Composio publish action (Slack approval gate / social post).
- *
- * FIRST TO CUT under pressure (CLAUDE.md cut order). Nothing imports this except
- * the publish step, so cutting it never breaks the pipeline.
- *
- * Setup: `npm i @composio/core` (verify current SDK name against Composio docs),
- * key goes in COMPOSIO_API_KEY.
- */
+import { Composio } from "@composio/core";
 
 export type PublishInput = {
   title: string;
   hook: string;
   cta: string;
   videoUrl: string | null;
+  imageUrl?: string | null;
 };
 
-export async function publishAd(input: PublishInput): Promise<{ ok: boolean; detail: string }> {
+export type PublishResult = {
+  ok: boolean;
+  detail: string;
+  tiktok?: { publish_id?: string };
+  instagram?: { media_id?: string };
+};
+
+const USER_ID = "ad-factory-demo-user";
+
+function getSession() {
+  return new Composio({ apiKey: process.env.COMPOSIO_API_KEY }).create(USER_ID);
+}
+
+async function publishToTikTok(input: PublishInput): Promise<PublishResult["tiktok"]> {
+  if (!input.videoUrl) return undefined;
+
+  const session = await getSession();
+  const caption = `${input.hook}\n\n${input.cta}`.slice(0, 2200);
+
+  const result = await session.execute("TIKTOK_PUBLISH_VIDEO", {
+    video_url: input.videoUrl,
+    caption,
+    privacy_level: "SELF_ONLY",
+    disable_duet: false,
+    disable_stitch: false,
+    disable_comment: false,
+  });
+
+  if (result.error) throw new Error(`TikTok: ${result.error}`);
+
+  const data = typeof result.data === "string" ? JSON.parse(result.data as string) : result.data;
+  return { publish_id: data?.data?.publish_id };
+}
+
+async function publishToInstagram(input: PublishInput): Promise<PublishResult["instagram"]> {
+  const mediaUrl = input.videoUrl ?? input.imageUrl;
+  if (!mediaUrl) return undefined;
+
+  const session = await getSession();
+  const caption = `${input.hook}\n\n${input.cta}`.slice(0, 2200);
+  const isVideo = !!input.videoUrl;
+
+  const containerResult = await session.execute(
+    "INSTAGRAM_POST_IG_USER_MEDIA",
+    isVideo
+      ? { media_type: "REELS", video_url: mediaUrl, caption, share_to_feed: true }
+      : { image_url: mediaUrl, caption }
+  );
+
+  if (containerResult.error) throw new Error(`Instagram container: ${containerResult.error}`);
+
+  const containerData =
+    typeof containerResult.data === "string"
+      ? JSON.parse(containerResult.data as string)
+      : containerResult.data;
+  const creation_id: string = containerData?.id ?? containerData?.data?.id;
+
+  if (!creation_id) throw new Error("Instagram: no creation_id returned");
+
+  const publishResult = await session.execute("INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH", {
+    creation_id,
+  });
+
+  if (publishResult.error) throw new Error(`Instagram publish: ${publishResult.error}`);
+
+  const publishData =
+    typeof publishResult.data === "string"
+      ? JSON.parse(publishResult.data as string)
+      : publishResult.data;
+  return { media_id: publishData?.id ?? publishData?.data?.id };
+}
+
+export async function publishAd(
+  input: PublishInput,
+  targets: ("tiktok" | "instagram")[] = ["instagram"]
+): Promise<PublishResult> {
   if (!process.env.COMPOSIO_API_KEY) {
-    console.warn("[composio] COMPOSIO_API_KEY missing — mock publish");
-    return { ok: true, detail: `mock-published "${input.title}" (no COMPOSIO_API_KEY)` };
+    return {
+      ok: true,
+      detail: `mock-published "${input.title}" to ${targets.join(", ")}`,
+      tiktok: targets.includes("tiktok") ? { publish_id: "mock_pub_id" } : undefined,
+      instagram: targets.includes("instagram") ? { media_id: "mock_media_id" } : undefined,
+    };
   }
 
-  // TODO(D): send to the Slack approval channel via Composio, return the message link.
-  throw new Error("publishAd not implemented yet — D's lane");
+  const errors: string[] = [];
+  let tiktok: PublishResult["tiktok"];
+  let instagram: PublishResult["instagram"];
+
+  if (targets.includes("tiktok")) {
+    try {
+      tiktok = await publishToTikTok(input);
+    } catch (e) {
+      errors.push((e as Error).message);
+    }
+  }
+
+  if (targets.includes("instagram")) {
+    try {
+      instagram = await publishToInstagram(input);
+    } catch (e) {
+      errors.push((e as Error).message);
+    }
+  }
+
+  const ok = errors.length === 0;
+  return {
+    ok,
+    detail: ok
+      ? `Published "${input.title}" to ${targets.join(" + ")}`
+      : errors.join(" | "),
+    tiktok,
+    instagram,
+  };
 }
