@@ -13,6 +13,7 @@ import {
   FileText,
   Image as ImageIcon,
   Library,
+  Loader2,
   Lock,
   LogOut,
   Moon,
@@ -67,12 +68,16 @@ export function JanusRemixStudio() {
   useEffect(() => {
     if (currentView !== "remix") return;
 
+    const transcript = window.sessionStorage.getItem("janus-import-transcript");
     const importedLink = window.sessionStorage.getItem("janus-import-link");
-    if (!importedLink) return;
+    if (!transcript && !importedLink) return;
 
+    window.sessionStorage.removeItem("janus-import-transcript");
     window.sessionStorage.removeItem("janus-import-link");
     setComposer(
-      `Remix this imported video source: ${importedLink}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Janus-style remix prompt for a short-form ad.`
+      transcript
+        ? `Remix this imported video into a short-form ad.\n\nTranscript:\n${transcript}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Janus-style remix prompt.`
+        : `Remix this imported video source: ${importedLink}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Janus-style remix prompt for a short-form ad.`
     );
   }, [currentView]);
 
@@ -174,13 +179,34 @@ function getStudioView(pathname: string | null): StudioView {
 function ImportView() {
   const router = useRouter();
   const [videoUrl, setVideoUrl] = useState("");
+  const [importing, setImporting] = useState(false);
 
-  function submitImport() {
+  async function submitImport() {
     const trimmed = videoUrl.trim();
-    if (!trimmed) return;
+    if (!trimmed || importing) return;
 
-    window.sessionStorage.setItem("janus-import-link", trimmed);
-    router.push("/");
+    setImporting(true);
+    try {
+      // Scrape the link → real transcript (Apify subtitles → gateway LLM → mock).
+      const res = await fetch("/api/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: trimmed }),
+      });
+      if (res.ok) {
+        const { transcript } = (await res.json()) as { transcript: string };
+        window.sessionStorage.setItem("janus-import-transcript", transcript);
+      } else {
+        // Non-TikTok or scrape failure — fall back to handing the raw link downstream.
+        window.sessionStorage.removeItem("janus-import-transcript");
+      }
+    } catch {
+      window.sessionStorage.removeItem("janus-import-transcript");
+    } finally {
+      window.sessionStorage.setItem("janus-import-link", trimmed);
+      setImporting(false);
+      router.push("/");
+    }
   }
 
   return (
@@ -204,20 +230,25 @@ function ImportView() {
               <input
                 value={videoUrl}
                 onChange={(event) => setVideoUrl(event.target.value)}
-                className="w-full bg-transparent text-sm outline-none placeholder:text-[#c9c2bc]"
+                disabled={importing}
+                className="w-full bg-transparent text-sm outline-none placeholder:text-[#c9c2bc] disabled:opacity-60"
                 placeholder="Paste a video link..."
               />
               <span className="mt-5 block text-xs font-medium text-[#a59b92]">
-                TikTok - YouTube Shorts - Instagram Reels
+                {importing ? "Transcribing the video…" : "TikTok - YouTube Shorts - Instagram Reels"}
               </span>
             </label>
             <button
               type="submit"
               aria-label="Import video link"
-              disabled={!videoUrl.trim()}
+              disabled={!videoUrl.trim() || importing}
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#c95f14] text-white hover:bg-[#ad500f] disabled:bg-[#c9c2bc]"
             >
-              <ArrowUp aria-hidden className="h-4 w-4" />
+              {importing ? (
+                <Loader2 aria-hidden className="h-4 w-4 animate-spin" />
+              ) : (
+                <ArrowUp aria-hidden className="h-4 w-4" />
+              )}
             </button>
           </div>
         </form>
