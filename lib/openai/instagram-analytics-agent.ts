@@ -1,10 +1,17 @@
-import { Agent, run, setDefaultOpenAIKey } from "@openai/agents";
+import { Agent, run, tool } from "@openai/agents";
+import { z } from "zod";
 import {
   fetchInstagramAnalytics,
   type InstagramPostAnalytics,
   type InstagramAnalyticsSnapshot,
 } from "@/lib/composio/instagram-analytics";
-import { currentAgentModelSettings, getAgentModel, getOpenAIApiKey } from "@/lib/openai/remix-agent";
+import {
+  configureOpenAIAgentsSdk,
+  currentAgentModelSettings,
+  getAgentApiMode,
+  getAgentModel,
+  getAgentProvider,
+} from "@/lib/openai/remix-agent";
 
 export type InstagramAnalyticsAgentResult = {
   live: boolean;
@@ -14,40 +21,69 @@ export type InstagramAnalyticsAgentResult = {
   recommendations: string[];
   program: string;
   snapshot: InstagramAnalyticsSnapshot;
+  provider: "truefoundry" | "openai";
+  agentApiMode: "chat_completions" | "responses";
+  toolCalled: boolean;
 };
 
 const INSTAGRAM_ANALYTICS_INSTRUCTIONS = [
   "You are an Instagram analytics strategist for a hackathon demo.",
-  "Use the supplied read-only Composio Instagram analytics data.",
+  "First call fetch_instagram_analytics to get read-only Composio Instagram analytics data.",
   "Return strict JSON with keys summary and recommendations.",
   "recommendations must be an array of exactly three short strings.",
   "Do not claim anything was published. Do not invent account data.",
 ].join("\n");
 
 export async function runInstagramAnalyticsAgent(): Promise<InstagramAnalyticsAgentResult> {
-  const snapshot = await fetchInstagramAnalytics();
   const model = getAgentModel();
-  const apiKey = getOpenAIApiKey();
+  const provider = getAgentProvider();
+  const agentApiMode = getAgentApiMode();
+  const configured = configureOpenAIAgentsSdk();
+  let snapshot: InstagramAnalyticsSnapshot | undefined;
+  let toolCalled = false;
   let mocked = true;
-  let { summary, recommendations } = fallbackAnalyticsNarrative(snapshot);
+  let summary = "";
+  let recommendations: string[] = [];
 
-  if (apiKey) {
+  if (configured) {
     try {
-      setDefaultOpenAIKey(apiKey);
+      const fetchAnalyticsTool = tool({
+        name: "fetch_instagram_analytics",
+        description: "Fetch read-only Instagram profile, media, and insights through Composio.",
+        parameters: z.object({}),
+        execute: async () => {
+          toolCalled = true;
+          snapshot = await fetchInstagramAnalytics();
+          return JSON.stringify(snapshot);
+        },
+      });
       const agent = new Agent({
         name: "Harness Instagram Analytics Agent",
         instructions: INSTAGRAM_ANALYTICS_INSTRUCTIONS,
         model,
         modelSettings: currentAgentModelSettings(model),
+        tools: [fetchAnalyticsTool],
+        toolUseBehavior: "run_llm_again",
       });
-      const result = await run(agent, compactAnalyticsInput(snapshot), { maxTurns: 2 });
+      const result = await run(agent, "Analyze the connected Instagram account and return the requested JSON.", {
+        maxTurns: 3,
+      });
       const parsed = parseAgentJson(String(result.finalOutput ?? ""));
-      summary = parsed.summary || summary;
-      recommendations = parsed.recommendations.length > 0 ? parsed.recommendations.slice(0, 3) : recommendations;
+      if (!snapshot) snapshot = await fetchInstagramAnalytics();
+      const fallback = fallbackAnalyticsNarrative(snapshot);
+      summary = parsed.summary || fallback.summary;
+      recommendations = parsed.recommendations.length > 0 ? parsed.recommendations.slice(0, 3) : fallback.recommendations;
       mocked = false;
     } catch {
       mocked = true;
     }
+  }
+
+  if (!snapshot) snapshot = await fetchInstagramAnalytics();
+  if (!summary || recommendations.length === 0) {
+    const fallback = fallbackAnalyticsNarrative(snapshot);
+    summary = summary || fallback.summary;
+    recommendations = recommendations.length > 0 ? recommendations : fallback.recommendations;
   }
 
   return {
@@ -58,24 +94,10 @@ export async function runInstagramAnalyticsAgent(): Promise<InstagramAnalyticsAg
     recommendations,
     program: buildInstagramAnalyticsProgram(snapshot, summary, recommendations),
     snapshot,
+    provider,
+    agentApiMode,
+    toolCalled,
   };
-}
-
-function compactAnalyticsInput(snapshot: InstagramAnalyticsSnapshot) {
-  return JSON.stringify({
-    live: snapshot.live,
-    profile: snapshot.profile,
-    posts: snapshot.posts.map((post) => ({
-      title: post.title,
-      mediaType: post.mediaType,
-      views: post.views,
-      reach: post.reach,
-      likes: post.likes,
-      comments: post.comments,
-      shares: post.shares,
-      totalInteractions: post.totalInteractions,
-    })),
-  });
 }
 
 function fallbackAnalyticsNarrative(snapshot: InstagramAnalyticsSnapshot) {

@@ -9,7 +9,7 @@ services:
     startCommand: npm run start
     envVars:
       - key: NODE_VERSION
-        value: 22.22.2
+        value: 22.22.2   # Next 16 requires ^20.19 || ^22.13 || >=24
       - key: OPENAI_API_KEY
         sync: false
       - key: OPEN_AI_API
@@ -34,7 +34,9 @@ services:
         sync: false
       - key: FAL_KEY
         sync: false
-      - key: BLOB_READ_WRITE_TOKEN
+      - key: CLOUDINARY_URL          # mirror target (replaced Vercel Blob)
+        sync: false
+      - key: APIFY_TOKEN             # TikTok URL → transcript
         sync: false
       - key: COMPOSIO_API_KEY
         sync: false

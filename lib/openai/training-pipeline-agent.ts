@@ -1,6 +1,10 @@
-import { Agent, run, setDefaultOpenAIKey } from "@openai/agents";
+import { Agent, run } from "@openai/agents";
 import { getTrainingPipelineSummary, type FastinoTrainingJob } from "@/lib/analytics/fine-tuning";
-import { currentAgentModelSettings, getAgentModel, getOpenAIApiKey } from "@/lib/openai/remix-agent";
+import {
+  configureOpenAIAgentsSdk,
+  currentAgentModelSettings,
+  getAgentModel,
+} from "@/lib/openai/remix-agent";
 import type { ChatHistoryEvent } from "@/lib/analytics/chat-history";
 import type { FineTuneRecord } from "@/lib/analytics/fine-tuning";
 
@@ -28,14 +32,13 @@ const TRAINING_AGENT_INSTRUCTIONS = [
 export async function runTrainingPipelineAgent(): Promise<TrainingPipelineAgentResult> {
   const pipeline = await getTrainingPipelineSummary();
   const model = getAgentModel();
-  const apiKey = getOpenAIApiKey();
+  const configured = configureOpenAIAgentsSdk();
   let mocked = true;
   let summary = pipeline.summary;
   let recommendations = fallbackRecommendations(pipeline.records);
 
-  if (apiKey) {
+  if (configured) {
     try {
-      setDefaultOpenAIKey(apiKey);
       const agent = new Agent({
         name: "Harness ClickHouse Fastino Planner",
         instructions: TRAINING_AGENT_INSTRUCTIONS,

@@ -1,4 +1,5 @@
-import { Agent, run, setDefaultOpenAIKey } from "@openai/agents";
+import { Agent, run, setDefaultOpenAIClient, setOpenAIAPI } from "@openai/agents";
+import OpenAI from "openai";
 
 export type RemixAgentMessage = {
   role: "system" | "user" | "assistant";
@@ -9,6 +10,8 @@ export type RemixAgentResult = {
   output: string;
   model: string;
   mocked: boolean;
+  provider: "truefoundry" | "openai";
+  agentApiMode: "chat_completions" | "responses";
 };
 
 const DEFAULT_AGENT_MODEL = "gpt-5.4-mini";
@@ -22,15 +25,54 @@ const REMIX_AGENT_INSTRUCTIONS = [
 ].join("\n");
 
 export function getOpenAIApiKey() {
+  if (isTrueFoundryGatewayConfigured()) return process.env.TRUEFOUNDRY_API_KEY ?? "";
   return process.env.OPENAI_API_KEY ?? process.env.OPEN_AI_API ?? "";
 }
 
 export function getOpenAIBaseUrl() {
+  if (isTrueFoundryGatewayConfigured()) {
+    return process.env.TRUEFOUNDRY_GATEWAY_URL!.replace(/\/$/, "");
+  }
+
   return (process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, "");
 }
 
 export function getAgentModel() {
-  return process.env.OPENAI_AGENT_MODEL ?? DEFAULT_AGENT_MODEL;
+  return (
+    process.env.OPENAI_AGENT_MODEL ??
+    (isTrueFoundryGatewayConfigured()
+      ? process.env.PIONEER_MODEL ?? process.env.BASE_MODEL
+      : undefined) ??
+    DEFAULT_AGENT_MODEL
+  );
+}
+
+export function isTrueFoundryGatewayConfigured() {
+  return Boolean(process.env.TRUEFOUNDRY_GATEWAY_URL && process.env.TRUEFOUNDRY_API_KEY);
+}
+
+export function getAgentProvider(): "truefoundry" | "openai" {
+  return isTrueFoundryGatewayConfigured() ? "truefoundry" : "openai";
+}
+
+export function getAgentApiMode(): "chat_completions" | "responses" {
+  const configured = process.env.OPENAI_AGENTS_API;
+  if (configured === "chat_completions" || configured === "responses") return configured;
+  return isTrueFoundryGatewayConfigured() ? "chat_completions" : "responses";
+}
+
+export function configureOpenAIAgentsSdk() {
+  const apiKey = getOpenAIApiKey();
+  if (!apiKey) return false;
+
+  setOpenAIAPI(getAgentApiMode());
+  setDefaultOpenAIClient(
+    new OpenAI({
+      apiKey,
+      baseURL: getOpenAIBaseUrl(),
+    })
+  );
+  return true;
 }
 
 export function currentAgentModelSettings(model = getAgentModel()) {
@@ -58,19 +100,22 @@ export function currentResponsesApiSettings(model = getAgentModel()) {
 
 export async function runRemixAgent(messages: RemixAgentMessage[]): Promise<RemixAgentResult> {
   const model = getAgentModel();
-  const apiKey = getOpenAIApiKey();
+  const provider = getAgentProvider();
+  const agentApiMode = getAgentApiMode();
+  const configured = configureOpenAIAgentsSdk();
   const input = transcriptFromMessages(messages);
 
-  if (!apiKey) {
+  if (!configured) {
     return {
       output: fallbackRemixResponse(input),
       model,
       mocked: true,
+      provider,
+      agentApiMode,
     };
   }
 
   try {
-    setDefaultOpenAIKey(apiKey);
     const agent = new Agent({
       name: "Harness Remix Director",
       instructions: REMIX_AGENT_INSTRUCTIONS,
@@ -83,6 +128,8 @@ export async function runRemixAgent(messages: RemixAgentMessage[]): Promise<Remi
       output: String(result.finalOutput ?? fallbackRemixResponse(input)),
       model,
       mocked: false,
+      provider,
+      agentApiMode,
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "agent run failed";
@@ -90,6 +137,8 @@ export async function runRemixAgent(messages: RemixAgentMessage[]): Promise<Remi
       output: `${fallbackRemixResponse(input)}\n\nLocal agent note: ${detail}`,
       model,
       mocked: true,
+      provider,
+      agentApiMode,
     };
   }
 }
