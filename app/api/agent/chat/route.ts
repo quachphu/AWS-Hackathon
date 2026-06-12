@@ -22,6 +22,7 @@ export async function POST(req: Request) {
   const input = transcriptFromMessages(messages);
   const apiKey = getOpenAIApiKey();
   const model = getAgentModel();
+  const provider = getAgentProvider();
   const prompt = latestUserPrompt(messages);
 
   if (isTrainingPipelineRequest(input)) {
@@ -33,7 +34,7 @@ export async function POST(req: Request) {
         eventType: "analytics_pull",
         role: "assistant",
         model: pipeline.model,
-        provider: "openai",
+        provider,
         prompt,
         response: pipeline.summary,
         artifactType: "TrainingPipelineArtifact",
@@ -60,7 +61,7 @@ export async function POST(req: Request) {
           eventType: "chat_turn",
           role: "assistant",
           model,
-          provider: "openai",
+          provider,
           prompt,
           response: text,
           qualityLabel: "training_pipeline_error",
@@ -81,7 +82,7 @@ export async function POST(req: Request) {
         eventType: "analytics_pull",
         role: "assistant",
         model: analytics.model,
-        provider: "composio",
+        provider: analytics.provider,
         prompt,
         response: analytics.summary,
         artifactType: "InstagramAnalyticsArtifact",
@@ -92,6 +93,8 @@ export async function POST(req: Request) {
         live: analytics.live,
         metadata: {
           source: analytics.snapshot.source,
+          agentApiMode: analytics.agentApiMode,
+          toolCalled: analytics.toolCalled,
           username: analytics.snapshot.profile.username,
           posts: analytics.snapshot.posts.length,
         },
@@ -107,7 +110,7 @@ export async function POST(req: Request) {
           eventType: "chat_turn",
           role: "assistant",
           model,
-          provider: "openai",
+          provider,
           prompt,
           response: text,
           qualityLabel: "instagram_analytics_error",
@@ -128,7 +131,7 @@ export async function POST(req: Request) {
         eventType: "chat_turn",
         role: "assistant",
         model,
-        provider: "openai",
+        provider,
         prompt,
         response: text,
         artifactType: "RemixPromptArtifact",
@@ -141,6 +144,30 @@ export async function POST(req: Request) {
   }
 
   try {
+    if (getAgentApiMode() === "chat_completions") {
+      const result = await runRemixAgent(messages);
+      return openAIResponsesTextStream(result.output, () =>
+        recordChatHistoryEvent({
+          sessionId: "openui-agent-demo",
+          surface: "agent",
+          eventType: "chat_turn",
+          role: "assistant",
+          model: result.model,
+          provider: result.provider,
+          prompt,
+          response: result.output,
+          artifactType: "RemixPromptArtifact",
+          qualityLabel: "image_prompt",
+          action: "agent_chat_agents_sdk",
+          mocked: result.mocked,
+          live: !result.mocked,
+          metadata: {
+            agentApiMode: result.agentApiMode,
+          },
+        })
+      );
+    }
+
     const upstream = await fetch(`${getOpenAIBaseUrl()}/responses`, {
       method: "POST",
       headers: {
@@ -172,7 +199,7 @@ export async function POST(req: Request) {
           eventType: "chat_turn",
           role: "assistant",
           model,
-          provider: "openai",
+          provider,
           prompt,
           response: text,
           artifactType: "RemixPromptArtifact",
@@ -191,7 +218,7 @@ export async function POST(req: Request) {
         eventType: "chat_turn",
         role: "assistant",
         model,
-        provider: "openai",
+        provider,
         prompt,
         response,
         artifactType: "RemixPromptArtifact",
@@ -217,7 +244,7 @@ export async function POST(req: Request) {
         eventType: "chat_turn",
         role: "assistant",
         model,
-        provider: "openai",
+        provider,
         prompt,
         response: text,
         artifactType: "RemixPromptArtifact",
