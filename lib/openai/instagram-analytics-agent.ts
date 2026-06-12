@@ -61,7 +61,7 @@ export async function runInstagramAnalyticsAgent(): Promise<InstagramAnalyticsAg
         name: "Harness Instagram Analytics Agent",
         instructions: INSTAGRAM_ANALYTICS_INSTRUCTIONS,
         model,
-        modelSettings: currentAgentModelSettings(model),
+        modelSettings: { ...currentAgentModelSettings(model), toolChoice: "required" },
         tools: [fetchAnalyticsTool],
         toolUseBehavior: "run_llm_again",
       });
