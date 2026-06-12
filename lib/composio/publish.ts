@@ -17,8 +17,12 @@ export type PublishResult = {
 
 const USER_ID = "ad-factory-demo-user";
 
+function getComposioApiKey() {
+  return process.env.COMPOSIO_API_KEY ?? process.env.COMPOSIO_API;
+}
+
 function getSession() {
-  return new Composio({ apiKey: process.env.COMPOSIO_API_KEY }).create(USER_ID);
+  return new Composio({ apiKey: getComposioApiKey() }).create(USER_ID);
 }
 
 async function publishToTikTok(input: PublishInput): Promise<PublishResult["tiktok"]> {
@@ -84,7 +88,7 @@ export async function publishAd(
   input: PublishInput,
   targets: ("tiktok" | "instagram")[] = ["instagram"]
 ): Promise<PublishResult> {
-  if (!process.env.COMPOSIO_API_KEY) {
+  if (!getComposioApiKey()) {
     return {
       ok: true,
       detail: `mock-published "${input.title}" to ${targets.join(", ")}`,

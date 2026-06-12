@@ -30,3 +30,5 @@ services:
         sync: false
       - key: COMPOSIO_API_KEY
         sync: false
+      - key: COMPOSIO_API
+        sync: false
