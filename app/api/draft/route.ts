@@ -18,13 +18,14 @@ export async function POST(req: Request) {
 
   const t0 = performance.now();
   try {
-    const draft = await generateDraft({ source, content, model: body.model });
+    const { draft, cost_usd } = await generateDraft({ source, content, model: body.model });
     await logEvent({
       phase: "draft",
       model: draft.meta.model,
       provider: "truefoundry",
       draft_id: draft.title, // good enough for the chart's countDistinct
       latency_ms: Math.round(performance.now() - t0),
+      cost_usd,
       ok: true,
     });
     return NextResponse.json(draft);
