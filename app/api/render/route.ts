@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { NextResponse } from "next/server";
 import { mockVideoUrl } from "@/lib/mock";
 import { logEvent } from "@/lib/metrics/clickhouse";
@@ -29,17 +30,52 @@ const hasImageKeys = () =>
   !!process.env.REPLICATE_API_TOKEN && !!process.env.CLOUDINARY_URL;
 const hasVideoKeys = () => !!process.env.FAL_KEY && !!process.env.CLOUDINARY_URL;
 
-// jobId → handle. In-memory is fine: Render runs one long-lived process, so the
-// map survives between the submit and the polls. A restart loses jobs (fine for
-// a demo). Real Fal jobs carry the statusUrl/responseUrl pollVideo needs; mock
-// jobs just carry a start time.
+// Jobs are encoded into the returned jobId so polling survives Render restarts
+// or worker changes; the map is only an in-process fast path.
+
 type TrackedJob =
   | { mode: "real"; job: VideoJob; shotId: string; draftId?: string }
   | { mode: "mock"; startedAt: number; shotId: string };
+type RealTrackedJob = Extract<TrackedJob, { mode: "real" }>;
 
 const videoJobs = new Map<string, TrackedJob>();
+const TRACKED_JOB_PREFIX = "renderjob_";
 const MOCK_VIDEO_MS = 8000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function encodeTrackedJob(tracked: TrackedJob): string {
+  const payload = Buffer.from(JSON.stringify(tracked), "utf8").toString("base64url");
+  return `${TRACKED_JOB_PREFIX}${payload}`;
+}
+
+function decodeTrackedJob(jobId: string): TrackedJob | null {
+  if (!jobId.startsWith(TRACKED_JOB_PREFIX)) return null;
+
+  try {
+    const payload = jobId.slice(TRACKED_JOB_PREFIX.length);
+    const json = Buffer.from(payload, "base64url").toString("utf8");
+    const parsed = JSON.parse(json) as TrackedJob | null;
+    if (parsed?.mode === "mock") {
+      return typeof parsed.startedAt === "number" && !!parsed.shotId ? parsed : null;
+    }
+    if (parsed?.mode === "real") {
+      if (
+        !parsed.job?.jobId ||
+        !parsed.job?.statusUrl ||
+        !parsed.job?.responseUrl ||
+        !parsed.job?.provider ||
+        typeof parsed.job.durationSeconds !== "number" ||
+        !parsed.shotId
+      ) {
+        return null;
+      }
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req: Request) {
   const { kind, shotId, prompt, draftId, model, startImageUrl, durationSeconds } =
@@ -88,16 +124,19 @@ export async function POST(req: Request) {
     if (kind === "video") {
       // MOCK fallback.
       if (!hasVideoKeys()) {
-        const jobId = `mockjob_${shotId}_${Date.now()}`;
-        videoJobs.set(jobId, { mode: "mock", startedAt: Date.now(), shotId });
+        const tracked: TrackedJob = { mode: "mock", startedAt: Date.now(), shotId };
+        const jobId = encodeTrackedJob(tracked);
+        videoJobs.set(jobId, tracked);
         return NextResponse.json({ jobId });
       }
 
       // REAL — Fal Seedance. Submit returns instantly; client polls via GET.
       // NEVER awaited to completion here — that's what GET ?jobId is for.
       const job = await submitVideo(prompt, { startImageUrl, durationSeconds });
-      videoJobs.set(job.jobId, { mode: "real", job, shotId, draftId });
-      return NextResponse.json({ jobId: job.jobId });
+      const tracked: RealTrackedJob = { mode: "real", job, shotId, draftId };
+      const jobId = encodeTrackedJob(tracked);
+      videoJobs.set(jobId, tracked);
+      return NextResponse.json({ jobId, providerJobId: job.jobId });
     }
 
     return NextResponse.json({ error: `unknown kind: ${kind}` }, { status: 400 });
@@ -120,9 +159,12 @@ export async function GET(req: Request) {
   if (!jobId) {
     return NextResponse.json({ error: "jobId is required" }, { status: 400 });
   }
-  const tracked = videoJobs.get(jobId);
+  const tracked = videoJobs.get(jobId) ?? decodeTrackedJob(jobId);
   if (!tracked) {
     return NextResponse.json({ status: "failed", error: "unknown job" }, { status: 404 });
+  }
+  if (!videoJobs.has(jobId)) {
+    videoJobs.set(jobId, tracked);
   }
 
   // MOCK job — fake the elapsed-time gate.
