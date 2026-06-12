@@ -339,7 +339,7 @@ function ImportView() {
       <div className="-mt-20 w-full max-w-[540px] text-center">
         <h1 className="text-xl font-semibold">Import a video</h1>
         <p className="mt-2 text-sm text-[#847970]">
-          Paste a TikTok, YouTube Shorts, or Instagram Reels link to transcribe and remix it.
+          Paste an Instagram Reels link to transcribe and remix it.
         </p>
 
         <form
@@ -360,7 +360,7 @@ function ImportView() {
                 placeholder="Paste a video link..."
               />
               <span className="mt-5 block text-xs font-medium text-[#a59b92]">
-                {importing ? "Transcribing the video…" : "TikTok - YouTube Shorts - Instagram Reels"}
+                {importing ? "Transcribing the video…" : "Instagram Reels"}
               </span>
             </label>
             <button
@@ -378,13 +378,6 @@ function ImportView() {
           </div>
         </form>
 
-        <p className="mt-3 text-xs font-medium text-red-600">
-          Monthly remix limit reached and not enough credits (3 of 10).{" "}
-          <button type="button" className="underline underline-offset-2">
-            Top up
-          </button>{" "}
-          to keep creating.
-        </p>
         <p className="mt-3 text-xs text-[#8a8077]">
           Tip: <span className="font-semibold text-[#c95f14]">create a persona</span> to tailor this ad to a
           specific customer.
@@ -969,13 +962,10 @@ function Composer({
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <ModeChip icon={Sparkles} label="Director" active />
         <ModeChip icon={FileText} label="Script" />
-        <ModeChip icon={SlidersHorizontal} label="Think" />
         <span className="ml-auto inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs font-medium text-[#736960]">
           <Bot aria-hidden className="h-4 w-4" />
           gpt-5.4 mini
         </span>
-        <IconButton label="Preview video" icon={Play} />
-        <IconButton label="Settings" icon={Settings} />
         <button
           type="button"
           aria-label="Send remix prompt"
