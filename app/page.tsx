@@ -1,4 +1,4 @@
-"use client";
+import { OpenUIStudio } from "@/components/openui/OpenUIStudio";
 
 import { useState } from "react";
 import type { Draft } from "@/lib/schema";
