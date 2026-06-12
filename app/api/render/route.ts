@@ -3,7 +3,7 @@ import { mockVideoUrl } from "@/lib/mock";
 import { logEvent } from "@/lib/metrics/clickhouse";
 
 /**
- * MOCK render endpoint — B swaps the internals for the lifted JanusLabs wrappers
+ * MOCK render endpoint — B swaps the internals for the lifted VisualLabs wrappers
  * (lib/render/). The contract below is what C builds against. Keep the contract,
  * swap the internals.
  *

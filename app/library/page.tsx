@@ -1,5 +1,5 @@
-import { JanusRemixStudio } from "@/components/openui/JanusRemixStudio";
+import { VisualRemixStudio } from "@/components/openui/VisualRemixStudio";
 
 export default function LibraryPage() {
-  return <JanusRemixStudio />;
+  return <VisualRemixStudio />;
 }

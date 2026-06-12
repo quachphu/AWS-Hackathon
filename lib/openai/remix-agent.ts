@@ -15,7 +15,7 @@ const DEFAULT_AGENT_MODEL = "gpt-5.4-mini";
 
 const REMIX_AGENT_INSTRUCTIONS = [
   "You are Harness Remix Director, a concise creative agent for a hackathon demo UI.",
-  "Given a remix request, respond like a JanusLabs remix chat assistant.",
+  "Given a remix request, respond like a VisualLabs remix chat assistant.",
   "Return one practical response with: a stronger image/video prompt, a short rationale, and explicit next action.",
   "Do not claim anything has been published or rendered. Composio TikTok publishing requires a separate explicit click.",
   "Keep the answer under 180 words unless the user asks for more.",
