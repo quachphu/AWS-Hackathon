@@ -1,5 +1,6 @@
 import { generateObject, generateText } from "ai";
 import { draftModel, BASE_MODEL, PIONEER_MODEL, isGatewayConfigured } from "@/lib/gateway/client";
+import { MOCK_FALLBACK_MODEL } from "@/lib/gateway/models";
 import { draftContentSchema, type Draft, type DraftContent } from "@/lib/schema";
 import { mockDraft } from "@/lib/mock";
 
@@ -66,7 +67,7 @@ export async function generateDraft(input: DraftInput): Promise<DraftResult> {
   if (!isGatewayConfigured) {
     console.warn("[draft] TRUEFOUNDRY_* env missing — serving mockDraft");
     return {
-      draft: { ...mockDraft, meta: { model: "mock-fallback", source: input.source } },
+      draft: { ...mockDraft, meta: { model: MOCK_FALLBACK_MODEL, source: input.source } },
       cost_usd: 0,
       input_tokens: 0,
       output_tokens: 0,
