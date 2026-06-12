@@ -38,13 +38,17 @@ export function getOpenAIBaseUrl() {
 }
 
 export function getAgentModel() {
-  return (
-    process.env.OPENAI_AGENT_MODEL ??
-    (isTrueFoundryGatewayConfigured()
-      ? process.env.PIONEER_MODEL ?? process.env.BASE_MODEL
-      : undefined) ??
-    DEFAULT_AGENT_MODEL
-  );
+  if (isTrueFoundryGatewayConfigured()) {
+    return (
+      process.env.TRUEFOUNDRY_AGENT_MODEL ??
+      process.env.BASE_MODEL ??
+      process.env.PIONEER_MODEL ??
+      process.env.OPENAI_AGENT_MODEL ??
+      DEFAULT_AGENT_MODEL
+    );
+  }
+
+  return process.env.OPENAI_AGENT_MODEL ?? DEFAULT_AGENT_MODEL;
 }
 
 export function isTrueFoundryGatewayConfigured() {
