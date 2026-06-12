@@ -1,4 +1,5 @@
 import { createClient } from "@clickhouse/client";
+import { getRuntimeModelConfig } from "@/lib/gateway/models";
 
 export type ChatSurface = "remix" | "agent" | "instagram" | "analytics";
 
@@ -266,13 +267,15 @@ function parseMetadata(value: string) {
 }
 
 function seedChatHistoryEvents(): ChatHistoryEvent[] {
+  const modelConfig = getRuntimeModelConfig();
+
   return [
     normalizeEvent({
       eventId: "seed-instagram-analytics",
       sessionId: "seed-demo",
       surface: "instagram",
       eventType: "analytics_pull",
-      model: process.env.OPENAI_AGENT_MODEL ?? "gpt-5.4-mini",
+      model: modelConfig.agent.modelId,
       provider: "composio",
       prompt: "Pull live Instagram analytics from Composio and render the OpenUI artifact.",
       response:
@@ -290,8 +293,8 @@ function seedChatHistoryEvents(): ChatHistoryEvent[] {
       sessionId: "seed-demo",
       surface: "remix",
       eventType: "chat_turn",
-      model: process.env.OPENAI_AGENT_MODEL ?? "gpt-5.4-mini",
-      provider: "openai",
+      model: modelConfig.agent.modelId,
+      provider: modelConfig.agent.provider,
       prompt:
         "Remix this imported video source: https://www.tiktok.com/@visual/video/123. Transcribe the hook and generate an image prompt.",
       response:

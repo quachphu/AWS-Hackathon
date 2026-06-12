@@ -20,8 +20,6 @@ import {
   Moon,
   Play,
   Send,
-  Settings,
-  SlidersHorizontal,
   Sparkles,
   Star,
   Trash2,
@@ -40,6 +38,7 @@ import {
   type RemixMessage,
   type RemixProject,
 } from "@/lib/remix/store";
+import type { RuntimeModelConfig } from "@/lib/gateway/models";
 
 type RemixTab = "source" | "image" | "video";
 
@@ -113,6 +112,24 @@ export function VisualRemixStudio() {
   const [activeTab, setActiveTab] = useState<RemixTab>("source");
   // The remix project loaded from the library (null on the blank "/remix" view).
   const [project, setProject] = useState<RemixProject | null>(null);
+  const [modelConfig, setModelConfig] = useState<RuntimeModelConfig | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadModelConfig() {
+      const res = await fetch("/api/models");
+      if (!res.ok) return;
+      const nextModelConfig = (await res.json()) as RuntimeModelConfig;
+      if (!cancelled) setModelConfig(nextModelConfig);
+    }
+
+    void loadModelConfig();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load a saved remix project from the library when the route carries an id.
   useEffect(() => {
@@ -154,6 +171,7 @@ export function VisualRemixStudio() {
       id: createClientId(),
       role: "user",
       content: trimmed,
+      model: modelConfig?.agent.modelId,
     };
 
     setMessages((current) => [...current, userMessage]);
@@ -245,6 +263,7 @@ export function VisualRemixStudio() {
             error instanceof Error
               ? `Agent note: ${error.message}. Keep the remix moving with the current prompt artifact.`
               : "Agent note: the request failed. Keep the remix moving with the current prompt artifact.",
+          model: modelConfig?.agent.modelId,
           mocked: true,
         },
       ]);
@@ -277,6 +296,7 @@ export function VisualRemixStudio() {
               <Composer
                 value={composer}
                 running={running}
+                modelConfig={modelConfig}
                 onChange={setComposer}
                 onSubmit={() => void sendPrompt(composer)}
               />
@@ -284,6 +304,7 @@ export function VisualRemixStudio() {
             <RemixChatPanel
               messages={messages}
               running={running}
+              modelConfig={modelConfig}
               analyticsProgram={analyticsProgram}
               onSend={(prompt) => void sendPrompt(prompt)}
             />
@@ -1078,17 +1099,20 @@ function IconButton({ label, icon: Icon }: { label: string; icon: LucideIcon }) 
 function RemixChatPanel({
   messages,
   running,
+  modelConfig,
   analyticsProgram,
   onSend,
 }: {
   messages: RemixMessage[];
   running: boolean;
+  modelConfig: RuntimeModelConfig | null;
   analyticsProgram: string | null;
   onSend: (prompt: string) => void;
 }) {
   const [quickPrompt, setQuickPrompt] = useState("");
   const [artifactErrors, setArtifactErrors] = useState<OpenUIError[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const agentModel = modelConfig?.agent.modelId;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -1117,6 +1141,15 @@ function RemixChatPanel({
           <button type="button" className="text-[#c95f14] hover:underline">
             + Create one
           </button>
+        </div>
+        <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-[#80766e]">
+          <span>Trace:</span>
+          <span className="rounded-md bg-[#f4f1ee] px-2 py-1">
+            {modelConfig?.agent.apiMode ?? "loading"}
+          </span>
+          <span className="min-w-0 flex-1 truncate" title={agentModel ?? "Loading model"}>
+            {agentModel ?? "Loading model"}
+          </span>
         </div>
       </div>
 
@@ -1202,6 +1235,7 @@ function RemixChatPanel({
 
 function ChatBubble({ message, first }: { message: RemixMessage; first: boolean }) {
   const assistant = message.role === "assistant";
+  const modelLabel = assistant ? "response" : "request";
 
   return (
     <div
@@ -1215,7 +1249,7 @@ function ChatBubble({ message, first }: { message: RemixMessage; first: boolean 
       <p>{message.content}</p>
       {message.model ? (
         <p className={assistant && !first ? "mt-2 text-xs text-[#82766d]" : "mt-2 text-xs text-white/70"}>
-          {message.model}
+          {modelLabel}: {message.model}
           {message.mocked ? " fallback" : ""}
         </p>
       ) : null}
@@ -1226,11 +1260,13 @@ function ChatBubble({ message, first }: { message: RemixMessage; first: boolean 
 function Composer({
   value,
   running,
+  modelConfig,
   onChange,
   onSubmit,
 }: {
   value: string;
   running: boolean;
+  modelConfig: RuntimeModelConfig | null;
   onChange: (value: string) => void;
   onSubmit: () => void;
 }) {
@@ -1254,9 +1290,12 @@ function Composer({
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <ModeChip icon={Sparkles} label="Director" active />
         <ModeChip icon={FileText} label="Script" />
-        <span className="ml-auto inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs font-medium text-[#736960]">
+        <span
+          className="ml-auto inline-flex h-8 min-w-0 max-w-[260px] items-center gap-2 rounded-md px-2 text-xs font-medium text-[#736960]"
+          title={modelConfig?.agent.modelId ?? "Loading model"}
+        >
           <Bot aria-hidden className="h-4 w-4" />
-          gpt-5.4 mini
+          <span className="min-w-0 truncate">{modelConfig?.agent.modelId ?? "Loading model"}</span>
         </span>
         <button
           type="button"
