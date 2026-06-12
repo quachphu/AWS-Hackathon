@@ -1,4 +1,5 @@
 import { runInstagramAnalyticsAgent } from "@/lib/openai/instagram-analytics-agent";
+import { recordChatHistoryEvent } from "@/lib/analytics/chat-history";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,27 @@ export async function POST() {
 
 async function analyticsResponse() {
   const result = await runInstagramAnalyticsAgent();
+  await recordChatHistoryEvent({
+    sessionId: "visual-remix-demo",
+    surface: "instagram",
+    eventType: "analytics_pull",
+    role: "assistant",
+    model: result.model,
+    provider: "composio",
+    prompt: "Pull live Instagram analytics from Composio and render the OpenUI artifact.",
+    response: result.summary,
+    artifactType: "InstagramAnalyticsArtifact",
+    artifactProgram: result.program,
+    qualityLabel: "instagram_analytics",
+    action: "render_instagram_openui",
+    mocked: result.mocked || !result.live,
+    live: result.live,
+    metadata: {
+      source: result.snapshot.source,
+      username: result.snapshot.profile.username,
+      posts: result.snapshot.posts.length,
+    },
+  });
 
   return Response.json({
     live: result.live,

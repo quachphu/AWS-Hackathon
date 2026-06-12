@@ -15,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Harness Remix Studio",
+  title: "VisualLabs Trend Remix Engine",
   description:
-    "Sponsor-powered remix production line: source trend to prompt, image, video, analytics, and publish handoff.",
+    "Autonomous short-form trend remix engine for prompt generation, OpenUI artifacts, analytics, and publish handoff.",
 };
 
 export default function RootLayout({

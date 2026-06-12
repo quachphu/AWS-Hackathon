@@ -21,7 +21,7 @@ npm run dev                  # http://localhost:3000
 | Owner | Branch | Lane |
 | --- | --- | --- |
 | **A — model & gateway** | `a-draft-gen` | `lib/gateway/`, `lib/draft/`, `app/api/draft/`, `lib/schema.ts` (**frozen at minute 20**) |
-| **B — render & data** | `b-image-render` | `lib/render/` (lift from JanusLabs), `lib/metrics/`, `app/api/render/` |
+| **B — render & data** | `b-image-render` | `lib/render/` (lift from VisualLabs), `lib/metrics/`, `app/api/render/` |
 | **C — frontend & demo** | `c-storyboard` | `app/page.tsx`, `components/`, deploy (`render.yaml`) |
 | **D — integration & demo lead** | `d-composio` | `lib/composio/`, glue, fallback assets, demo script |
 

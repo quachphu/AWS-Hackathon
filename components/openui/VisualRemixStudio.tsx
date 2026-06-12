@@ -27,8 +27,8 @@ import {
   Video,
   type LucideIcon,
 } from "lucide-react";
-import { JANUS_REMIX_ARTIFACT_PROGRAM } from "@/lib/openui/janus-programs";
-import { janusOpenUiLibrary } from "@/components/openui/janus-openui-library";
+import { VISUAL_REMIX_ARTIFACT_PROGRAM } from "@/lib/openui/visual-programs";
+import { visualOpenUiLibrary } from "@/components/openui/visual-openui-library";
 
 type RemixMessage = {
   id: string;
@@ -38,7 +38,7 @@ type RemixMessage = {
   model?: string;
 };
 
-type StudioView = "import" | "library" | "remix";
+type StudioView = "import" | "library" | "remix" | "analytics";
 
 type InstagramAnalyticsResponse = {
   live: boolean;
@@ -47,6 +47,37 @@ type InstagramAnalyticsResponse = {
   summary: string;
   program: string;
   profile?: { username?: string };
+};
+
+type TrainingPipelineResponse = {
+  live: boolean;
+  mocked: boolean;
+  model: string;
+  summary: string;
+  recommendations: string[];
+  program: string;
+  eventCount: number;
+  recordCount: number;
+  clickhouseMode: string;
+  job: {
+    jobId: string;
+    status: string;
+    pipeline: string;
+    modelTarget: string;
+    trainRecords: number;
+    evalRecords: number;
+    metrics: {
+      promptQuality: number;
+      visualSpecificity: number;
+      safetyPassRate: number;
+    };
+  };
+};
+
+type DatasetExportResponse = {
+  mode: string;
+  count: number;
+  jsonl: string;
 };
 
 const heroImageUrl =
@@ -67,7 +98,7 @@ const initialMessages: RemixMessage[] = [
   },
 ];
 
-export function JanusRemixStudio() {
+export function VisualRemixStudio() {
   const pathname = usePathname();
   const currentView = getStudioView(pathname);
   const [messages, setMessages] = useState<RemixMessage[]>(initialMessages);
@@ -78,12 +109,12 @@ export function JanusRemixStudio() {
   useEffect(() => {
     if (currentView !== "remix") return;
 
-    const importedLink = window.sessionStorage.getItem("janus-import-link");
+    const importedLink = window.sessionStorage.getItem("visual-import-link");
     if (!importedLink) return;
 
-    window.sessionStorage.removeItem("janus-import-link");
+    window.sessionStorage.removeItem("visual-import-link");
     setComposer(
-      `Remix this imported video source: ${importedLink}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Janus-style remix prompt for a short-form ad.`
+      `Remix this imported video source: ${importedLink}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Visual-style remix prompt for a short-form ad.`
     );
   }, [currentView]);
 
@@ -122,6 +153,31 @@ export function JanusRemixStudio() {
             }. ${data.summary}`,
             model: data.model,
             mocked: data.mocked || !data.live,
+          },
+        ]);
+        return;
+      }
+
+      if (isTrainingPipelinePrompt(trimmed)) {
+        const res = await fetch("/api/analytics/openui", {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+        });
+
+        if (!res.ok) throw new Error(`training pipeline failed (${res.status})`);
+
+        const data = (await res.json()) as TrainingPipelineResponse;
+        setAnalyticsProgram(data.program);
+        setMessages((current) => [
+          ...current,
+          {
+            id: createClientId(),
+            role: "assistant",
+            content: `${data.clickhouseMode === "clickhouse" ? "Live ClickHouse" : "Local memory"} history produced ${
+              data.recordCount
+            } Fastino-ready JSONL records. ${data.summary}`,
+            model: data.model,
+            mocked: data.mocked || data.clickhouseMode !== "clickhouse",
           },
         ]);
         return;
@@ -177,6 +233,8 @@ export function JanusRemixStudio() {
           <ImportView />
         ) : currentView === "library" ? (
           <LibraryView />
+        ) : currentView === "analytics" ? (
+          <AnalyticsView />
         ) : (
           <>
             <section className="relative min-h-screen min-w-0 px-4 py-5 pb-5 lg:px-8 lg:pr-[410px]">
@@ -213,9 +271,28 @@ function isInstagramAnalyticsPrompt(prompt: string) {
   );
 }
 
+function isTrainingPipelinePrompt(prompt: string) {
+  const normalized = prompt.toLowerCase();
+  return (
+    (normalized.includes("clickhouse") ||
+      normalized.includes("fastino") ||
+      normalized.includes("pioneer") ||
+      normalized.includes("fine-tun") ||
+      normalized.includes("jsonl") ||
+      normalized.includes("training")) &&
+    (normalized.includes("chat") ||
+      normalized.includes("history") ||
+      normalized.includes("prompt") ||
+      normalized.includes("analytics") ||
+      normalized.includes("dataset"))
+  );
+}
+
 function getStudioView(pathname: string | null): StudioView {
   if (pathname?.startsWith("/import")) return "import";
   if (pathname?.startsWith("/library")) return "library";
+  if (pathname?.startsWith("/analytics")) return "analytics";
+  if (pathname?.startsWith("/remix")) return "remix";
   return "remix";
 }
 
@@ -227,8 +304,8 @@ function ImportView() {
     const trimmed = videoUrl.trim();
     if (!trimmed) return;
 
-    window.sessionStorage.setItem("janus-import-link", trimmed);
-    router.push("/");
+    window.sessionStorage.setItem("visual-import-link", trimmed);
+    router.push("/remix");
   }
 
   return (
@@ -310,6 +387,192 @@ function LibraryView() {
   );
 }
 
+function AnalyticsView() {
+  const [pipeline, setPipeline] = useState<TrainingPipelineResponse | null>(null);
+  const [jsonl, setJsonl] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [training, setTraining] = useState(false);
+  const [error, setError] = useState("");
+  const [artifactErrors, setArtifactErrors] = useState<OpenUIError[]>([]);
+
+  async function refresh() {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await fetchTrainingPipelineView();
+      setPipeline(data.pipeline);
+      setJsonl(data.jsonl);
+    } catch (refreshError) {
+      setError(refreshError instanceof Error ? refreshError.message : "Unable to load analytics pipeline.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError("");
+      try {
+        const data = await fetchTrainingPipelineView();
+        if (cancelled) return;
+        setPipeline(data.pipeline);
+        setJsonl(data.jsonl);
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "Unable to load analytics pipeline.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function startMockTraining() {
+    setTraining(true);
+    setError("");
+    try {
+      const res = await fetch("/api/analytics/train", { method: "POST" });
+      if (!res.ok) throw new Error(`mock training failed (${res.status})`);
+      await refresh();
+    } catch (trainError) {
+      setError(trainError instanceof Error ? trainError.message : "Mock training failed.");
+    } finally {
+      setTraining(false);
+    }
+  }
+
+  const jsonlPreview = jsonl
+    .split("\n")
+    .slice(0, 6)
+    .join("\n");
+
+  return (
+    <section className="min-h-screen min-w-0 px-4 py-10 lg:px-8">
+      <div className="mx-auto w-full max-w-[1210px]">
+        <p className="text-sm text-[#81776f]">Workspace</p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-3xl font-semibold leading-tight">Analytics</h1>
+            <p className="mt-2 max-w-[860px] text-sm text-[#81776f]">
+              Append-only chat history capture, OpenUI artifact metadata, and a mock Pioneer/Fastino prompt-model
+              handoff for the hackathon demo.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href="/api/analytics/export?format=jsonl"
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-[#ded8d2] bg-white px-3 text-sm font-semibold text-[#4f4740] hover:bg-[#f8f5f2]"
+            >
+              <Download aria-hidden className="h-4 w-4" />
+              JSONL
+            </a>
+            <button
+              type="button"
+              onClick={() => void startMockTraining()}
+              disabled={training}
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-[#c95f14] px-3 text-sm font-semibold text-white hover:bg-[#ad500f] disabled:opacity-45"
+            >
+              <Play aria-hidden className="h-4 w-4" />
+              {training ? "Running" : "Mock train"}
+            </button>
+          </div>
+        </div>
+
+        {error ? (
+          <p className="mt-5 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>
+        ) : null}
+
+        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <StatusRow label="Storage" value={pipeline?.clickhouseMode ?? (loading ? "loading" : "memory")} />
+          <StatusRow label="Events" value={pipeline?.eventCount.toString() ?? "-"} />
+          <StatusRow label="JSONL records" value={pipeline?.recordCount.toString() ?? "-"} />
+          <StatusRow label="Fastino job" value={pipeline?.job.status.replace("_", " ") ?? "mock ready"} />
+        </div>
+
+        <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="min-h-[420px] rounded-xl border border-[#e0dbd4] bg-white p-4 shadow-[0_8px_24px_rgba(35,28,22,0.1)]">
+            {pipeline ? (
+              <ChatProvider apiUrl="/api/agent/chat" streamProtocol={openAIResponsesAdapter()}>
+                <Renderer
+                  library={visualOpenUiLibrary}
+                  response={pipeline.program}
+                  onError={setArtifactErrors}
+                />
+                <ArtifactPortalTarget />
+              </ChatProvider>
+            ) : (
+              <div className="flex min-h-[360px] items-center justify-center text-sm text-[#81776f]">
+                Loading analytics artifact...
+              </div>
+            )}
+            {artifactErrors.length > 0 ? (
+              <p className="mt-3 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                {artifactErrors[0]?.message}
+              </p>
+            ) : null}
+          </div>
+
+          <aside className="rounded-xl border border-[#e0dbd4] bg-[#211c18] p-4 text-white shadow-[0_8px_24px_rgba(35,28,22,0.12)]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold">JSONL preview</h2>
+                <p className="mt-1 text-xs text-white/60">Fine-tuning records for the small prompt model.</p>
+              </div>
+              <span className="rounded-md bg-white/10 px-2 py-1 text-xs">{pipeline?.job.pipeline ?? "mock"}</span>
+            </div>
+            <pre className="mt-4 max-h-[330px] overflow-auto whitespace-pre-wrap rounded-md bg-black/30 p-3 text-xs leading-5 text-[#f5e7dc]">
+              {jsonlPreview || "No records yet."}
+            </pre>
+            {pipeline ? (
+              <div className="mt-4 space-y-2 text-xs text-white/70">
+                <p>Model target: {pipeline.job.modelTarget}</p>
+                <p>
+                  Split: {pipeline.job.trainRecords} train / {pipeline.job.evalRecords} eval
+                </p>
+                <p>Prompt quality: {Math.round(pipeline.job.metrics.promptQuality * 100)}%</p>
+              </div>
+            ) : null}
+          </aside>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StatusRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-[#e0dbd4] bg-white px-4 py-3 shadow-[0_8px_20px_rgba(35,28,22,0.08)]">
+      <p className="text-xs font-semibold uppercase text-[#8c827a]">{label}</p>
+      <p className="mt-2 truncate text-lg font-semibold text-[#211c18]">{value}</p>
+    </div>
+  );
+}
+
+async function fetchTrainingPipelineView() {
+  const [pipelineRes, exportRes] = await Promise.all([
+    fetch("/api/analytics/openui"),
+    fetch("/api/analytics/export?limit=12"),
+  ]);
+
+  if (!pipelineRes.ok) throw new Error(`pipeline artifact failed (${pipelineRes.status})`);
+  if (!exportRes.ok) throw new Error(`dataset export failed (${exportRes.status})`);
+
+  const [pipeline, dataset] = (await Promise.all([
+    pipelineRes.json(),
+    exportRes.json(),
+  ])) as [TrainingPipelineResponse, DatasetExportResponse];
+
+  return { pipeline, jsonl: dataset.jsonl };
+}
+
 function StudioSidebar({ currentView }: { currentView: StudioView }) {
   const router = useRouter();
 
@@ -320,7 +583,7 @@ function StudioSidebar({ currentView }: { currentView: StudioView }) {
           <Sparkles aria-hidden className="h-4 w-4" />
         </span>
         <div>
-          <p className="text-sm font-semibold">JanusLabs</p>
+          <p className="text-sm font-semibold">VisualLabs</p>
           <p className="text-xs text-[#82766d]">Harness demo</p>
         </div>
       </div>
@@ -342,7 +605,13 @@ function StudioSidebar({ currentView }: { currentView: StudioView }) {
           label="Remix"
           icon={Sparkles}
           active={currentView === "remix"}
-          onClick={() => router.push("/")}
+          onClick={() => router.push("/remix")}
+        />
+        <SidebarNavItem
+          label="Analytics"
+          icon={BarChart3}
+          active={currentView === "analytics"}
+          onClick={() => router.push("/analytics")}
         />
       </nav>
 
@@ -545,8 +814,8 @@ function RemixChatPanel({
           streamProtocol={openAIResponsesAdapter()}
         >
           <Renderer
-            library={janusOpenUiLibrary}
-            response={analyticsProgram ?? JANUS_REMIX_ARTIFACT_PROGRAM}
+            library={visualOpenUiLibrary}
+            response={analyticsProgram ?? VISUAL_REMIX_ARTIFACT_PROGRAM}
             onError={setArtifactErrors}
           />
           <ArtifactPortalTarget />
@@ -562,15 +831,28 @@ function RemixChatPanel({
       </div>
 
       <div className="border-t border-[#ebe6e0] p-3">
-        <button
-          type="button"
-          onClick={() => onSend("Pull live Instagram analytics from Composio and render the OpenUI artifact.")}
-          disabled={running}
-          className="mb-2 inline-flex h-8 items-center gap-2 rounded-md border border-[#e0a371] bg-[#fff3ea] px-2 text-xs font-semibold text-[#b95c1f] hover:bg-white disabled:opacity-45"
-        >
-          <BarChart3 aria-hidden className="h-4 w-4" />
-          Live IG analytics
-        </button>
+        <div className="mb-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => onSend("Pull live Instagram analytics from Composio and render the OpenUI artifact.")}
+            disabled={running}
+            className="inline-flex h-8 items-center gap-2 rounded-md border border-[#e0a371] bg-[#fff3ea] px-2 text-xs font-semibold text-[#b95c1f] hover:bg-white disabled:opacity-45"
+          >
+            <BarChart3 aria-hidden className="h-4 w-4" />
+            Live IG analytics
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              onSend("Show the ClickHouse chat history export and mock Fastino Pioneer training pipeline as an OpenUI artifact.")
+            }
+            disabled={running}
+            className="inline-flex h-8 items-center gap-2 rounded-md border border-[#d8c8bc] bg-white px-2 text-xs font-semibold text-[#6b5546] hover:bg-[#fff7f0] disabled:opacity-45"
+          >
+            <Sparkles aria-hidden className="h-4 w-4" />
+            Fastino loop
+          </button>
+        </div>
         <div className="flex items-center gap-2 rounded-lg border border-[#ded8d2] bg-[#fbfaf8] px-3 py-2">
           <input
             value={quickPrompt}

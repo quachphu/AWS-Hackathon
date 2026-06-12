@@ -19,7 +19,7 @@ The one-sentence pitch: *"A small model writes the ad, gets cheaper and better o
 ## Hard constraints
 
 - **~5 hours. Solo bottlenecks kill teams.** Spread the spine (see roles).
-- **From scratch.** This is NOT the JanusLabs app. We are rebuilding ONE vertical slice.
+- **From scratch.** This is NOT the VisualLabs app. We are rebuilding ONE vertical slice.
 - **DELETE by default.** No auth, no DB of record, no Stripe, no rate-limiting, no admin, no `proxy.ts` guards. Hardcode the user. Every time you reach for business scaffolding, ask: *will a judge see this in the 2-minute demo?* If no, don't build it.
 - **The render wrappers are the ONE exception** — we lift `lib/render/` wholesale (see below). That's our core feature, not scaffolding.
 
@@ -31,7 +31,7 @@ The one-sentence pitch: *"A small model writes the ad, gets cheaper and better o
 | --- | --- | --- |
 | App | Next.js 16, single page + 2–3 API routes | Stripped to studs. No auth, no DB of record. |
 | UI | React 19 / Tailwind v4 / TS | Home turf. |
-| Render wrappers | **Lifted from JanusLabs `lib/render/`** | Replicate (image) + Fal (video), queue, status polling, Blob mirror. **Reuse, do not rebuild.** |
+| Render wrappers | **Lifted from VisualLabs `lib/render/`** | Replicate (image) + Fal (video), queue, status polling, Blob mirror. **Reuse, do not rebuild.** |
 | Draft glue | AI SDK (structured output) | Routing goes through the gateway, not direct providers. |
 
 **Cut from the render layer (do NOT port these):** chained-extension for >15s clips (single ≤15s clip only — the ffmpeg-concat path is a time sink), MAX-tier resolution gating, refund/error-category ledger. One resolution, one short clip, fire-and-poll.
@@ -132,7 +132,7 @@ Drop in this order, no debate:
 
 - **Don't rebuild rendering.** The queue/polling/Blob-mirror is the most dangerous code to rewrite under a clock. Lift it.
 - **Never render video live on stage.** Image = live (returns in seconds). Video = async/pre-baked (minutes, fails often). Kick the hero render off at the *start* of the demo, reveal at the climax, keep a pre-rendered clip in your back pocket.
-- **Don't re-add JanusLabs scaffolding from muscle memory.** Auth, real DB, Stripe — none of it earns points.
+- **Don't re-add VisualLabs scaffolding from muscle memory.** Auth, real DB, Stripe — none of it earns points.
 - **Don't claim TrueFoundry depth we don't use.** We use the LLM-gateway core (routing + cost). We are NOT using MCP Gateway / Agent Gateway. Don't overclaim.
 - **Don't let the render chase pull Pioneer + the cost chart out of the demo.** Those are two of our sponsor judges. Video is the wow; the sponsor pipeline is the point.
 - **Push to the shared deploy early and often.** "Works on my machine" is worthless when judges hit a URL.
@@ -167,4 +167,4 @@ COMPOSIO_API_KEY=           # publish action (cut-first)
 BLOB_READ_WRITE_TOKEN=      # mirror rendered artifacts (provider URLs are ephemeral)
 ```
 
-Provider URLs expire — mirror every render to Blob, same as JanusLabs did. That carry-over IS worth keeping.
+Provider URLs expire — mirror every render to Blob, same as VisualLabs did. That carry-over IS worth keeping.

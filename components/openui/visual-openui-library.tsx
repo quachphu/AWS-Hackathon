@@ -43,6 +43,32 @@ const instagramAnalyticsArtifactSchema = z.object({
   recommendations: z.array(z.string()),
 });
 
+const trainingMetricSchema = z.object({
+  label: z.string(),
+  value: z.string(),
+  detail: z.string(),
+});
+
+const trainingRecordSchema = z.object({
+  id: z.string(),
+  surface: z.string(),
+  qualityLabel: z.string(),
+  artifactType: z.string(),
+  score: z.number(),
+  prompt: z.string(),
+});
+
+const trainingPipelineArtifactSchema = z.object({
+  title: z.string(),
+  summary: z.string(),
+  storageMode: z.string(),
+  pipeline: z.string(),
+  status: z.string(),
+  metrics: z.array(trainingMetricSchema),
+  records: z.array(trainingRecordSchema),
+  steps: z.array(z.string()),
+});
+
 const RemixPromptArtifact = defineComponent({
   name: "RemixPromptArtifact",
   description: "OpenUI artifact preview for the generated remix prompt and approval checklist.",
@@ -105,7 +131,7 @@ const RemixPromptArtifact = defineComponent({
       </div>
     ),
     panelProps: {
-      className: "janus-artifact-panel",
+      className: "visual-artifact-panel",
     },
   }),
 });
@@ -212,7 +238,7 @@ const InstagramAnalyticsArtifact = defineComponent({
       </div>
     ),
     panelProps: {
-      className: "janus-artifact-panel",
+      className: "visual-artifact-panel",
     },
   }),
 });
@@ -226,16 +252,118 @@ function MetricTiny({ label, value }: { label: string; value: number }) {
   );
 }
 
-export const janusOpenUiLibrary = createLibrary({
+const TrainingPipelineArtifact = defineComponent({
+  name: "TrainingPipelineArtifact",
+  description: "OpenUI artifact for the append-only ClickHouse chat history and mock Fastino/Pioneer training loop.",
+  props: trainingPipelineArtifactSchema,
+  component: Artifact<z.infer<typeof trainingPipelineArtifactSchema>>({
+    title: (props) => props.title,
+    preview: (props, { open, isActive }) => (
+      <button
+        type="button"
+        onClick={open}
+        className={[
+          "w-full rounded-lg border p-3 text-left transition",
+          isActive
+            ? "border-[#c9682c] bg-[#fff4ec]"
+            : "border-[#e3ded8] bg-[#f2f0ed] hover:border-[#cfb39e] hover:bg-white",
+        ].join(" ")}
+      >
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#211c18] text-white">
+            <BarChart3 aria-hidden className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center justify-between gap-3">
+              <span className="text-sm font-semibold text-[#211c18]">{props.title}</span>
+              <span className="rounded-md border border-[#ded5ce] bg-white px-2 py-1 text-xs text-[#5f5750]">
+                {props.storageMode}
+              </span>
+            </span>
+            <span className="mt-2 line-clamp-3 block text-xs leading-5 text-[#6a625b]">
+              {props.summary}
+            </span>
+          </span>
+          <ExternalLink aria-hidden className="mt-1 h-4 w-4 shrink-0 text-[#9b8e84]" />
+        </div>
+      </button>
+    ),
+    panel: (props) => (
+      <div className="h-full overflow-y-auto bg-[#fbfaf8] p-4 text-[#211c18]">
+        <div className="mb-4 flex items-start justify-between gap-3 border-b border-[#e7e0da] pb-3">
+          <div>
+            <p className="text-xs font-semibold uppercase text-[#8c7d72]">Prompt model training loop</p>
+            <h2 className="mt-1 text-lg font-semibold">{props.title}</h2>
+            <p className="mt-1 text-xs text-[#7d7269]">
+              {props.pipeline} - {props.status}
+            </p>
+          </div>
+          <span className="rounded-md bg-[#211c18] px-2 py-1 text-xs font-semibold text-white">
+            {props.storageMode}
+          </span>
+        </div>
+
+        <p className="rounded-lg border border-[#e2dad4] bg-white p-3 text-sm leading-6 text-[#3b332d]">
+          {props.summary}
+        </p>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          {props.metrics.map((metric) => (
+            <div key={`${metric.label}-${metric.value}`} className="rounded-lg border border-[#e2dad4] bg-white p-3">
+              <p className="text-xs font-semibold text-[#8c7d72]">{metric.label}</p>
+              <p className="mt-1 text-lg font-semibold">{metric.value}</p>
+              <p className="mt-1 text-xs text-[#756b62]">{metric.detail}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 space-y-2">
+          {props.records.map((record) => (
+            <div key={record.id} className="rounded-lg border border-[#e2dad4] bg-white p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">{record.qualityLabel}</p>
+                  <p className="mt-1 text-xs text-[#8c7d72]">
+                    {record.surface} - {record.artifactType}
+                  </p>
+                </div>
+                <span className="inline-flex items-center gap-1 rounded-md bg-[#fff3ea] px-2 py-1 text-xs font-semibold text-[#b95c1f]">
+                  <Gauge aria-hidden className="h-3.5 w-3.5" />
+                  {record.score}
+                </span>
+              </div>
+              <p className="mt-3 line-clamp-3 text-xs leading-5 text-[#5f5750]">{record.prompt}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 space-y-2">
+          {props.steps.map((step) => (
+            <div key={step} className="flex gap-2 rounded-lg border border-[#e2dad4] bg-white p-3">
+              <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#c9682c]" />
+              <p className="text-sm leading-5 text-[#4b433c]">{step}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    ),
+    panelProps: {
+      className: "visual-artifact-panel",
+    },
+  }),
+});
+
+export const visualOpenUiLibrary = createLibrary({
   root: "RemixPromptArtifact",
-  components: [RemixPromptArtifact, InstagramAnalyticsArtifact],
+  components: [RemixPromptArtifact, InstagramAnalyticsArtifact, TrainingPipelineArtifact],
   componentGroups: [
     {
-      name: "Janus parity artifacts",
-      components: ["RemixPromptArtifact", "InstagramAnalyticsArtifact"],
+      name: "Visual parity artifacts",
+      components: ["RemixPromptArtifact", "InstagramAnalyticsArtifact", "TrainingPipelineArtifact"],
       notes: [
         "Use RemixPromptArtifact for the right-panel generated prompt artifact.",
         "Use InstagramAnalyticsArtifact for read-only Composio Instagram analytics pulled into chat.",
+        "Use TrainingPipelineArtifact for ClickHouse history, JSONL export, and mock Fastino/Pioneer status.",
         "Keep the artifact focused on image/video prompt approval and publish gates.",
       ],
     },

@@ -1,6 +1,6 @@
 # lib/render — B's lane
 
-Lift JanusLabs `lib/render/` here **wholesale**. Reuse, do not rebuild — the
+Lift VisualLabs `lib/render/` here **wholesale**. Reuse, do not rebuild — the
 queue / status-polling / Blob-mirror is the most dangerous code to rewrite under a clock.
 
 What lands here:

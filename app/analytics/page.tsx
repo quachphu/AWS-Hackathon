@@ -1,5 +1,5 @@
 import { VisualRemixStudio } from "@/components/openui/VisualRemixStudio";
 
-export default function ImportPage() {
+export default function AnalyticsPage() {
   return <VisualRemixStudio />;
 }
