@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatProvider, openAIResponsesAdapter } from "@openuidev/react-headless";
 import { Renderer, type OpenUIError } from "@openuidev/react-lang";
 import { ArtifactPortalTarget } from "@openuidev/react-ui";
+import { usePathname, useRouter } from "next/navigation";
 import {
+  ArrowUp,
   Bot,
   ChevronDown,
   Download,
@@ -35,6 +37,8 @@ type RemixMessage = {
   model?: string;
 };
 
+type StudioView = "import" | "library" | "remix";
+
 const heroImageUrl =
   "https://images.unsplash.com/photo-1753545975907-dcb51efdd0d5?auto=format&fit=crop&w=1200&q=88";
 
@@ -54,9 +58,23 @@ const initialMessages: RemixMessage[] = [
 ];
 
 export function JanusRemixStudio() {
+  const pathname = usePathname();
+  const currentView = getStudioView(pathname);
   const [messages, setMessages] = useState<RemixMessage[]>(initialMessages);
   const [composer, setComposer] = useState("");
   const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    if (currentView !== "remix") return;
+
+    const importedLink = window.sessionStorage.getItem("janus-import-link");
+    if (!importedLink) return;
+
+    window.sessionStorage.removeItem("janus-import-link");
+    setComposer(
+      `Remix this imported video source: ${importedLink}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Janus-style remix prompt for a short-form ad.`
+    );
+  }, [currentView]);
 
   async function sendPrompt(prompt: string) {
     const trimmed = prompt.trim();
@@ -118,28 +136,135 @@ export function JanusRemixStudio() {
   return (
     <main className="min-h-screen bg-[#f7f6f4] text-[#211c18]">
       <div className="lg:grid lg:min-h-screen lg:grid-cols-[216px_minmax(0,1fr)]">
-        <StudioSidebar />
-        <section className="relative min-h-screen min-w-0 px-4 py-5 pb-5 lg:px-8 lg:pr-[410px]">
-          <RemixHeader />
-          <MediaStage />
-          <Composer
-            value={composer}
-            running={running}
-            onChange={setComposer}
-            onSubmit={() => void sendPrompt(composer)}
-          />
-        </section>
-        <RemixChatPanel
-          messages={messages}
-          running={running}
-          onSend={(prompt) => void sendPrompt(prompt)}
-        />
+        <StudioSidebar currentView={currentView} />
+        {currentView === "import" ? (
+          <ImportView />
+        ) : currentView === "library" ? (
+          <LibraryView />
+        ) : (
+          <>
+            <section className="relative min-h-screen min-w-0 px-4 py-5 pb-5 lg:px-8 lg:pr-[410px]">
+              <RemixHeader />
+              <MediaStage />
+              <Composer
+                value={composer}
+                running={running}
+                onChange={setComposer}
+                onSubmit={() => void sendPrompt(composer)}
+              />
+            </section>
+            <RemixChatPanel
+              messages={messages}
+              running={running}
+              onSend={(prompt) => void sendPrompt(prompt)}
+            />
+          </>
+        )}
       </div>
     </main>
   );
 }
 
-function StudioSidebar() {
+function getStudioView(pathname: string | null): StudioView {
+  if (pathname?.startsWith("/import")) return "import";
+  if (pathname?.startsWith("/library")) return "library";
+  return "remix";
+}
+
+function ImportView() {
+  const router = useRouter();
+  const [videoUrl, setVideoUrl] = useState("");
+
+  function submitImport() {
+    const trimmed = videoUrl.trim();
+    if (!trimmed) return;
+
+    window.sessionStorage.setItem("janus-import-link", trimmed);
+    router.push("/");
+  }
+
+  return (
+    <section className="flex min-h-screen min-w-0 items-center justify-center px-4 py-12 lg:px-8">
+      <div className="-mt-20 w-full max-w-[540px] text-center">
+        <h1 className="text-xl font-semibold">Import a video</h1>
+        <p className="mt-2 text-sm text-[#847970]">
+          Paste a TikTok, YouTube Shorts, or Instagram Reels link to transcribe and remix it.
+        </p>
+
+        <form
+          className="mt-5 rounded-xl border border-[#e2ddd7] bg-white px-4 py-4 text-left shadow-[0_8px_28px_rgba(35,28,22,0.12)]"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitImport();
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <label className="min-w-0 flex-1">
+              <span className="sr-only">Video link</span>
+              <input
+                value={videoUrl}
+                onChange={(event) => setVideoUrl(event.target.value)}
+                className="w-full bg-transparent text-sm outline-none placeholder:text-[#c9c2bc]"
+                placeholder="Paste a video link..."
+              />
+              <span className="mt-5 block text-xs font-medium text-[#a59b92]">
+                TikTok - YouTube Shorts - Instagram Reels
+              </span>
+            </label>
+            <button
+              type="submit"
+              aria-label="Import video link"
+              disabled={!videoUrl.trim()}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#c95f14] text-white hover:bg-[#ad500f] disabled:bg-[#c9c2bc]"
+            >
+              <ArrowUp aria-hidden className="h-4 w-4" />
+            </button>
+          </div>
+        </form>
+
+        <p className="mt-3 text-xs font-medium text-red-600">
+          Monthly remix limit reached and not enough credits (3 of 10).{" "}
+          <button type="button" className="underline underline-offset-2">
+            Top up
+          </button>{" "}
+          to keep creating.
+        </p>
+        <p className="mt-3 text-xs text-[#8a8077]">
+          Tip: <span className="font-semibold text-[#c95f14]">create a persona</span> to tailor this ad to a
+          specific customer.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function LibraryView() {
+  return (
+    <section className="min-h-screen min-w-0 px-4 py-10 lg:px-8">
+      <div className="mx-auto w-full max-w-[1210px]">
+        <p className="text-sm text-[#81776f]">Workspace</p>
+        <h1 className="text-3xl font-semibold leading-tight">Library</h1>
+        <p className="mt-2 max-w-[940px] text-sm text-[#81776f]">
+          Saved character, character sheet, scene, video, and persona references. Attach them to any chat to keep
+          identity and look consistent across sessions.
+        </p>
+
+        <div className="mt-6 flex min-h-[165px] flex-col items-center justify-center rounded-xl border border-[#e0dbd4] bg-white px-8 text-center shadow-[0_8px_24px_rgba(35,28,22,0.12)]">
+          <Library aria-hidden className="h-9 w-9 text-[#c95f14]" />
+          <p className="mt-5 max-w-[880px] text-sm text-[#81776f]">
+            No saved references yet. In a Sandbox chat with Director Mode on, click Save to Library on a rendered
+            image to lock it in as a Character, Character Sheet, or Scene - or save a video render to keep the clip
+            alongside its spec.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StudioSidebar({ currentView }: { currentView: StudioView }) {
+  const router = useRouter();
+
   return (
     <aside className="hidden min-h-screen border-r border-[#dfdbd6] bg-[#ece9e6] px-3 py-5 text-[#302a25] lg:flex lg:flex-col">
       <div className="mb-8 flex items-center gap-2 px-2">
@@ -153,9 +278,24 @@ function StudioSidebar() {
       </div>
 
       <nav className="space-y-1">
-        <SidebarNavItem label="Import" icon={Upload} />
-        <SidebarNavItem label="Library" icon={Library} />
-        <SidebarNavItem label="Remix" icon={Sparkles} active />
+        <SidebarNavItem
+          label="Import"
+          icon={Upload}
+          active={currentView === "import"}
+          onClick={() => router.push("/import")}
+        />
+        <SidebarNavItem
+          label="Library"
+          icon={Library}
+          active={currentView === "library"}
+          onClick={() => router.push("/library")}
+        />
+        <SidebarNavItem
+          label="Remix"
+          icon={Sparkles}
+          active={currentView === "remix"}
+          onClick={() => router.push("/")}
+        />
       </nav>
 
       <div className="mt-auto">
@@ -185,14 +325,18 @@ function SidebarNavItem({
   label,
   icon: Icon,
   active,
+  onClick,
 }: {
   label: string;
   icon: LucideIcon;
   active?: boolean;
+  onClick: () => void;
 }) {
   return (
     <button
       type="button"
+      aria-current={active ? "page" : undefined}
+      onClick={onClick}
       className={[
         "flex w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm transition",
         active ? "bg-[#eadbd0] font-semibold text-[#9c4f24]" : "text-[#4f4740] hover:bg-white",
