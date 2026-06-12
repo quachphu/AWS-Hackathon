@@ -15,10 +15,11 @@ export const gateway = createOpenAI({
 });
 
 /** Base model id as registered behind the gateway — one side of the cost comparison. */
-export const BASE_MODEL = process.env.BASE_MODEL ?? "openai-main/gpt-4o-mini";
+export const BASE_MODEL = process.env.BASE_MODEL || "openai-main/gpt-4o-mini";
 
-/** Tuned Pioneer model id behind the gateway — swap in via env once training finishes. */
-export const PIONEER_MODEL = process.env.PIONEER_MODEL ?? BASE_MODEL;
+/** Tuned Pioneer model id behind the gateway — swap in via env once training finishes.
+ *  `||` not `??`: an empty PIONEER_MODEL= line in .env.local must fall back to base. */
+export const PIONEER_MODEL = process.env.PIONEER_MODEL || BASE_MODEL;
 
 export const isGatewayConfigured = Boolean(
   process.env.TRUEFOUNDRY_GATEWAY_URL && process.env.TRUEFOUNDRY_API_KEY
