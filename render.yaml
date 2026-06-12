@@ -1,0 +1,32 @@
+# C's lane — Render blueprint. Deploy in the FIRST HOUR, empty shell or not.
+# Dashboard: New → Blueprint → point at this repo, then fill the env vars there.
+services:
+  - type: web
+    name: ad-factory
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.14.0
+      - key: TRUEFOUNDRY_GATEWAY_URL
+        sync: false
+      - key: TRUEFOUNDRY_API_KEY
+        sync: false
+      - key: BASE_MODEL
+        sync: false
+      - key: PIONEER_MODEL
+        sync: false
+      - key: CLICKHOUSE_URL
+        sync: false
+      - key: CLICKHOUSE_PASSWORD
+        sync: false
+      - key: REPLICATE_API_TOKEN
+        sync: false
+      - key: FAL_KEY
+        sync: false
+      - key: BLOB_READ_WRITE_TOKEN
+        sync: false
+      - key: COMPOSIO_API_KEY
+        sync: false
