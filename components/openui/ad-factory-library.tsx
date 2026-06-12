@@ -192,6 +192,10 @@ function CreatorWorkspaceComponent({
   const [stills, setStills] = useState<Record<string, string>>({});
   const [videoStatus, setVideoStatus] = useState<"idle" | "rendering" | "done">("idle");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [publishState, setPublishState] = useState<{
+    status: "idle" | "publishing" | "done" | "error";
+    detail?: string;
+  }>({ status: "idle" });
   const videoPollRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -209,6 +213,7 @@ function CreatorWorkspaceComponent({
     setStills({});
     setVideoUrl(null);
     setVideoStatus("idle");
+    setPublishState({ status: "idle" });
     if (videoPollRef.current !== null) {
       window.clearInterval(videoPollRef.current);
       videoPollRef.current = null;
@@ -287,7 +292,40 @@ function CreatorWorkspaceComponent({
     videoPollRef.current = poll;
   }
 
+  async function handlePublish(targets: ("tiktok" | "instagram")[]) {
+    if (publishState.status === "publishing") return;
+
+    setPublishState({ status: "publishing" });
+    try {
+      const firstStill = stills[draft.shots[0]?.id ?? ""] ?? null;
+      const res = await fetch("/api/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: draft.title,
+          hook: draft.hook,
+          cta: draft.cta,
+          videoUrl,
+          imageUrl: firstStill,
+          targets,
+        }),
+      });
+      const data = (await res.json()) as { ok?: boolean; detail?: string; error?: string };
+      setPublishState({
+        status: data.ok ? "done" : "error",
+        detail: data.detail ?? data.error ?? "publish request failed",
+      });
+    } catch (e) {
+      setPublishState({
+        status: "error",
+        detail: e instanceof Error ? e.message : "publish request failed",
+      });
+    }
+  }
+
   const totalSeconds = draft.shots.reduce((sum, shot) => sum + shot.duration_s, 0);
+  const publishBusy = publishState.status === "publishing";
+  const firstStill = stills[draft.shots[0]?.id ?? ""];
 
   return (
     <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -354,6 +392,58 @@ function CreatorWorkspaceComponent({
               </div>
               {videoUrl ? (
                 <video src={videoUrl} controls className="mt-3 aspect-video w-full rounded-md bg-black" />
+              ) : null}
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/[0.06] p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-white">Publish via Composio</h4>
+                  <p className="mt-1 text-xs text-white/55">
+                    {videoUrl
+                      ? "Video ready for TikTok or Instagram."
+                      : firstStill
+                        ? "A still is ready for Instagram; render video for TikTok."
+                        : "Render stills or video before publishing."}
+                  </p>
+                </div>
+                <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-white/60">
+                  /api/publish
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => void handlePublish(["instagram"])}
+                  disabled={publishBusy || !firstStill}
+                  className="rounded-md border border-white/20 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-45"
+                >
+                  Instagram
+                </button>
+                <button
+                  onClick={() => void handlePublish(["tiktok"])}
+                  disabled={publishBusy || !videoUrl}
+                  className="rounded-md border border-white/20 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-45"
+                >
+                  TikTok
+                </button>
+                <button
+                  onClick={() => void handlePublish(["instagram", "tiktok"])}
+                  disabled={publishBusy || !firstStill}
+                  className="rounded-md bg-[#d98045] px-3 py-2 text-xs font-semibold text-white hover:bg-[#ef965a] disabled:opacity-45"
+                >
+                  {publishBusy ? "Publishing" : "Publish all"}
+                </button>
+              </div>
+              {publishState.status !== "idle" ? (
+                <p
+                  className={[
+                    "mt-2 text-xs",
+                    publishState.status === "done" ? "text-emerald-300" : "",
+                    publishState.status === "error" ? "text-red-300" : "",
+                    publishState.status === "publishing" ? "text-white/55" : "",
+                  ].join(" ")}
+                >
+                  {publishState.status === "publishing" ? "Sending to Composio..." : publishState.detail}
+                </p>
               ) : null}
             </div>
           </div>
