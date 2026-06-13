@@ -22,20 +22,25 @@ import {
   Send,
   Sparkles,
   Star,
+  Trash2,
   Upload,
   Video,
   type LucideIcon,
 } from "lucide-react";
 import { VISUAL_REMIX_ARTIFACT_PROGRAM } from "@/lib/openui/visual-programs";
 import { visualOpenUiLibrary } from "@/components/openui/visual-openui-library";
+import {
+  createProject,
+  deleteProject,
+  getProject,
+  listProjects,
+  saveProject,
+  type RemixMessage,
+  type RemixProject,
+} from "@/lib/remix/store";
+import type { RuntimeModelConfig } from "@/lib/gateway/models";
 
-type RemixMessage = {
-  id: string;
-  role: "assistant" | "user";
-  content: string;
-  mocked?: boolean;
-  model?: string;
-};
+type RemixTab = "source" | "image" | "video";
 
 type StudioView = "import" | "library" | "remix" | "analytics";
 
@@ -81,14 +86,11 @@ type DatasetExportResponse = {
 
 type PublishResponse = {
   ok: boolean;
-  detail: string;
   dryRun?: boolean;
-  instagram?: { media_id?: string };
-  tiktok?: { publish_id?: string };
+  detail?: string;
+  error?: string;
 };
 
-const heroImageUrl =
-  "https://images.unsplash.com/photo-1753545975907-dcb51efdd0d5?auto=format&fit=crop&w=1200&q=88";
 
 const initialMessages: RemixMessage[] = [
   {
@@ -104,15 +106,22 @@ const initialMessages: RemixMessage[] = [
       "Here is your render prompt for the intense hackathon moment. Keep the locked character, preserve the laptop-screen light, and use the teacher/student/lunch-lady line as the absurd contrast that makes the TikTok remix memorable.",
   },
 ];
+
 const defaultRenderPrompt = initialMessages.map((message) => message.content).join("\n\n");
 
 export function VisualRemixStudio() {
   const pathname = usePathname();
+  const router = useRouter();
   const currentView = getStudioView(pathname);
+  const projectId = getProjectId(pathname);
   const [messages, setMessages] = useState<RemixMessage[]>(initialMessages);
   const [composer, setComposer] = useState("");
   const [running, setRunning] = useState(false);
   const [analyticsProgram, setAnalyticsProgram] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<RemixTab>("source");
+  // The remix project loaded from the library (null on the blank "/remix" view).
+  const [project, setProject] = useState<RemixProject | null>(null);
+  const [modelConfig, setModelConfig] = useState<RuntimeModelConfig | null>(null);
   const [renderPrompt, setRenderPrompt] = useState(defaultRenderPrompt);
   const [renderedImageUrl, setRenderedImageUrl] = useState<string | null>(null);
   const [renderingImage, setRenderingImage] = useState(false);
@@ -122,20 +131,64 @@ export function VisualRemixStudio() {
   const [exportStatus, setExportStatus] = useState<string | null>(null);
 
   useEffect(() => {
-    if (currentView !== "remix") return;
+    let cancelled = false;
 
-    const transcript = window.sessionStorage.getItem("visual-import-transcript");
-    const importedLink = window.sessionStorage.getItem("visual-import-link");
-    if (!transcript && !importedLink) return;
+    async function loadModelConfig() {
+      const res = await fetch("/api/models");
+      if (!res.ok) return;
+      const nextModelConfig = (await res.json()) as RuntimeModelConfig;
+      if (!cancelled) setModelConfig(nextModelConfig);
+    }
 
-    window.sessionStorage.removeItem("visual-import-transcript");
-    window.sessionStorage.removeItem("visual-import-link");
-    setComposer(
-      transcript
-        ? `Remix this imported video into a short-form ad.\n\nTranscript:\n${transcript}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Visual-style remix prompt.`
-        : `Remix this imported video source: ${importedLink}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Visual-style remix prompt for a short-form ad.`
-    );
-  }, [currentView]);
+    void loadModelConfig();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load a saved remix project from the library when the route carries an id.
+  useEffect(() => {
+    if (!projectId) {
+      setProject(null);
+      setMessages(initialMessages);
+      setRenderedImageUrl(null);
+      setRenderPrompt(defaultRenderPrompt);
+      setRenderStatus("Ready");
+      setPublishStatus(null);
+      setExportStatus(null);
+      return;
+    }
+    const loaded = getProject(projectId);
+    if (!loaded) {
+      setProject(null);
+      return;
+    }
+    setProject(loaded);
+    setMessages(loaded.messages);
+    setRenderedImageUrl(loaded.imageUrl ?? null);
+    setRenderPrompt(latestAssistantRenderPrompt(loaded.messages));
+    setRenderStatus(loaded.imageUrl ? "Image ready" : "Ready");
+    setPublishStatus(null);
+    setExportStatus(null);
+    setActiveTab("source");
+
+    // Pre-fill the composer the first time a project is opened (no user turns yet).
+    const hasUserTurn = loaded.messages.some((message) => message.role === "user");
+    if (!hasUserTurn) {
+      setComposer(
+        loaded.transcript
+          ? `Remix this imported video into a short-form ad.\n\nTranscript:\n${loaded.transcript}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Visual-style remix prompt.`
+          : `Remix this imported video source: ${loaded.importedLink}\n\nTranscribe the hook, preserve the strongest visual beat, and generate a Visual-style remix prompt for a short-form ad.`
+      );
+    }
+  }, [projectId]);
+
+  // Persist the conversation back to the library as the user works.
+  useEffect(() => {
+    if (!project || project.id !== projectId) return;
+    saveProject({ ...project, messages, imageUrl: renderedImageUrl ?? project.imageUrl });
+  }, [messages, project, projectId, renderedImageUrl]);
 
   async function sendPrompt(prompt: string) {
     const trimmed = prompt.trim();
@@ -145,6 +198,7 @@ export function VisualRemixStudio() {
       id: createClientId(),
       role: "user",
       content: trimmed,
+      model: modelConfig?.agent.modelId,
     };
 
     setMessages((current) => [...current, userMessage]);
@@ -218,7 +272,9 @@ export function VisualRemixStudio() {
       const data = (await res.json()) as { output: string; model: string; mocked: boolean };
       setRenderPrompt(data.output);
       setRenderStatus("Prompt updated");
+      setPublishStatus(null);
       setExportStatus(null);
+      setActiveTab("image");
       setMessages((current) => [
         ...current,
         {
@@ -239,6 +295,7 @@ export function VisualRemixStudio() {
             error instanceof Error
               ? `Agent note: ${error.message}. Keep the remix moving with the current prompt artifact.`
               : "Agent note: the request failed. Keep the remix moving with the current prompt artifact.",
+          model: modelConfig?.agent.modelId,
           mocked: true,
         },
       ]);
@@ -250,9 +307,16 @@ export function VisualRemixStudio() {
   async function generateImageFromPrompt() {
     if (renderingImage) return;
 
-    const prompt = renderPrompt.trim() || defaultRenderPrompt;
+    const prompt = (renderPrompt.trim() || latestAssistantRenderPrompt(messages)).trim();
+    if (!prompt) {
+      setActiveTab("image");
+      setRenderStatus("Add or refine a prompt before rendering.");
+      return;
+    }
+
+    setActiveTab("image");
     setRenderingImage(true);
-    setRenderStatus("Rendering");
+    setRenderStatus("Rendering image...");
     setPublishStatus(null);
     setExportStatus(null);
 
@@ -262,46 +326,27 @@ export function VisualRemixStudio() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kind: "image",
-          shotId: "visual-remix-good-image",
+          shotId: project?.id ?? "visual-remix-demo",
           prompt,
-          draftId: "visual-remix-demo",
+          draftId: project?.id,
           model: "bytedance/seedream-4.5",
         }),
       });
-
-      if (!res.ok) throw new Error(`image render failed (${res.status})`);
       const data = (await res.json()) as { url?: string; error?: string };
-      if (!data.url) throw new Error(data.error ?? "image render returned no url");
+      if (!res.ok || !data.url) throw new Error(data.error ?? `image render failed (${res.status})`);
 
-      const mocked = data.url.includes("picsum.photos");
       setRenderedImageUrl(data.url);
       setRenderPrompt(prompt);
-      setRenderStatus(mocked ? "Mock image ready" : "Live image ready");
-      setMessages((current) => [
-        ...current,
-        {
-          id: createClientId(),
-          role: "assistant",
-          content: `${mocked ? "Mock" : "Live"} image generated. I saved this prompt/image pair for the Fastino export loop.`,
-          model: mocked ? "mock-replicate" : "replicate/seedream-4.5",
-          mocked,
-        },
-      ]);
+      setRenderStatus(data.url.includes("picsum.photos") ? "Mock image ready" : "Image ready");
 
-      await recordGoodImagePrompt(prompt, data.url, mocked);
+      if (project) {
+        setProject({ ...project, imageUrl: data.url });
+      }
+
+      await recordGoodImagePrompt(prompt, data.url, project);
       await exportPromptDataset();
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "image render failed";
-      setRenderStatus("Render failed");
-      setMessages((current) => [
-        ...current,
-        {
-          id: createClientId(),
-          role: "assistant",
-          content: `Render note: ${detail}. The current prompt is still available for another pass.`,
-          mocked: true,
-        },
-      ]);
+      setRenderStatus(error instanceof Error ? error.message : "Image render failed");
     } finally {
       setRenderingImage(false);
     }
@@ -309,96 +354,88 @@ export function VisualRemixStudio() {
 
   async function makePostDraft() {
     if (publishing) return;
-    if (!renderedImageUrl) {
-      setPublishStatus("Generate image first");
+
+    const imageUrl = renderedImageUrl ?? project?.imageUrl;
+    if (!imageUrl) {
+      setPublishStatus("Generate an image before preparing the post.");
+      setActiveTab("image");
       return;
     }
 
     setPublishing(true);
-    setPublishStatus("Preparing post");
+    setPublishStatus("Preparing dry-run post...");
 
     try {
       const res = await fetch("/api/publish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: "VisualLabs hackathon remix",
-          hook: "Teacher, student, lunch lady just lmk.",
-          cta: "Remix the trend before it cools off.",
-          imageUrl: renderedImageUrl,
+          title: project?.title ?? "VisualLabs remix",
+          hook: renderPrompt.slice(0, 180),
+          cta: "Post this remix when the connected account is approved.",
+          imageUrl,
           targets: ["instagram"],
           dryRun: true,
         }),
       });
-
       const data = (await res.json()) as PublishResponse;
-      if (!res.ok && !data.detail) throw new Error(`publish failed (${res.status})`);
-
-      setPublishStatus(data.detail);
-      setMessages((current) => [
-        ...current,
-        {
-          id: createClientId(),
-          role: "assistant",
-          content: data.detail,
-          model: data.dryRun ? "composio-dry-run" : "composio",
-          mocked: data.dryRun || !data.ok,
-        },
-      ]);
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `publish failed (${res.status})`);
+      setPublishStatus(data.detail ?? "Dry-run post prepared");
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "publish failed";
-      setPublishStatus(detail);
-      setMessages((current) => [
-        ...current,
-        {
-          id: createClientId(),
-          role: "assistant",
-          content: `Publish note: ${detail}`,
-          mocked: true,
-        },
-      ]);
+      setPublishStatus(error instanceof Error ? error.message : "Publish draft failed");
     } finally {
       setPublishing(false);
     }
   }
 
-  async function recordGoodImagePrompt(prompt: string, imageUrl: string, mocked: boolean) {
-    const res = await fetch("/api/analytics/history", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "visual-remix-demo",
-        surface: "remix",
-        eventType: "artifact_render",
-        role: "assistant",
-        model: "bytedance/seedream-4.5",
-        provider: mocked ? "mock-replicate" : "replicate",
-        prompt,
-        response: imageUrl,
-        artifactType: "RenderedImage",
-        qualityLabel: "good_image_prompt",
-        action: "render_good_image_prompt",
-        mocked,
-        live: !mocked,
-        metadata: {
-          imageUrl,
-          selectedForFastino: true,
-          promptLength: prompt.length,
-        },
-      }),
-    });
+  async function pullAnalytics() {
+    if (running) return;
+    await sendPrompt("Pull live Instagram analytics with Composio MCP and summarize the best prompt angle.");
+  }
 
-    if (!res.ok) throw new Error(`ClickHouse history write failed (${res.status})`);
+  async function recordGoodImagePrompt(
+    prompt: string,
+    imageUrl: string,
+    currentProject: RemixProject | null
+  ) {
+    try {
+      await fetch("/api/analytics/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: currentProject?.id ?? "visual-remix-demo",
+          surface: "remix",
+          eventType: "artifact_render",
+          role: "assistant",
+          model: "bytedance/seedream-4.5",
+          provider: "replicate",
+          prompt,
+          response: imageUrl,
+          artifactType: "ImageRender",
+          qualityLabel: "good_image_prompt",
+          action: "generate_image",
+          mocked: imageUrl.includes("picsum.photos"),
+          live: !imageUrl.includes("picsum.photos"),
+          sourceUrl: currentProject?.importedLink,
+          metadata: { projectTitle: currentProject?.title, imageUrl },
+        }),
+      });
+    } catch {
+      setExportStatus("Training event write skipped");
+    }
   }
 
   async function exportPromptDataset() {
-    const res = await fetch("/api/analytics/export?limit=100", {
-      headers: { "Content-Type": "application/json" },
-    });
-
-    if (!res.ok) throw new Error(`Fastino export failed (${res.status})`);
-    const data = (await res.json()) as DatasetExportResponse;
-    setExportStatus(`${data.mode} export: ${data.count} records`);
+    try {
+      const res = await fetch("/api/analytics/export?limit=25");
+      if (!res.ok) throw new Error(`export failed (${res.status})`);
+      const data = (await res.json()) as DatasetExportResponse;
+      setExportStatus(
+        `${data.count} prompt records exported to ${data.mode === "clickhouse" ? "ClickHouse" : "local memory"}`
+      );
+    } catch (error) {
+      setExportStatus(error instanceof Error ? error.message : "Training export failed");
+    }
   }
 
   return (
@@ -415,27 +452,32 @@ export function VisualRemixStudio() {
           <>
             <section className="relative min-h-screen min-w-0 px-4 py-5 pb-5 lg:px-8 lg:pr-[410px]">
               <RemixHeader
+                title={project?.title ?? DEMO_TITLE}
+                subtitle={project?.sourceLabel ?? DEMO_SUBTITLE}
+                activeTab={activeTab}
+                onTabChange={setActiveTab}
+                onBack={() => router.push("/library")}
+                hasImage={Boolean(renderedImageUrl ?? project?.imageUrl)}
                 renderingImage={renderingImage}
                 publishing={publishing}
-                hasImage={!!renderedImageUrl}
-                onGenerateImage={() => void generateImageFromPrompt()}
-                onMakePost={() => void makePostDraft()}
-                onPullAnalytics={() =>
-                  void sendPrompt("Pull live Instagram analytics from Composio and render the OpenUI artifact.")
-                }
+                onGenerateImage={generateImageFromPrompt}
+                onMakePost={makePostDraft}
+                onPullAnalytics={pullAnalytics}
               />
               <MediaStage
-                imageUrl={renderedImageUrl ?? heroImageUrl}
-                generated={!!renderedImageUrl}
-                rendering={renderingImage}
+                activeTab={activeTab}
+                project={project}
+                imageUrl={renderedImageUrl ?? project?.imageUrl}
+                renderPrompt={renderPrompt}
+                renderingImage={renderingImage}
                 renderStatus={renderStatus}
                 publishStatus={publishStatus}
                 exportStatus={exportStatus}
-                prompt={renderPrompt}
               />
               <Composer
                 value={composer}
                 running={running}
+                modelConfig={modelConfig}
                 onChange={setComposer}
                 onSubmit={() => void sendPrompt(composer)}
               />
@@ -443,6 +485,7 @@ export function VisualRemixStudio() {
             <RemixChatPanel
               messages={messages}
               running={running}
+              modelConfig={modelConfig}
               analyticsProgram={analyticsProgram}
               onSend={(prompt) => void sendPrompt(prompt)}
             />
@@ -481,12 +524,23 @@ function isTrainingPipelinePrompt(prompt: string) {
   );
 }
 
+// Fallback header copy for the blank "/remix" view (no project loaded yet).
+const DEMO_TITLE =
+  "@Kai Cenat this is my Audition. Teacher, student, lunch lady just lmk and me and";
+const DEMO_SUBTITLE = "tiktok - @Kai Cenat this is my Audition. Teacher, student, lunch lady";
+
 function getStudioView(pathname: string | null): StudioView {
   if (pathname?.startsWith("/import")) return "import";
   if (pathname?.startsWith("/library")) return "library";
   if (pathname?.startsWith("/analytics")) return "analytics";
   if (pathname?.startsWith("/remix")) return "remix";
   return "remix";
+}
+
+// "/remix/<id>" → the project id; "/remix" (blank) → null.
+function getProjectId(pathname: string | null): string | null {
+  const match = pathname?.match(/^\/remix\/([^/]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 function ImportView() {
@@ -499,6 +553,8 @@ function ImportView() {
     if (!trimmed || importing) return;
 
     setImporting(true);
+    let transcript = "";
+    let caption: string | undefined;
     try {
       // Scrape the link → real transcript (Apify subtitles → gateway LLM → mock).
       const res = await fetch("/api/ingest", {
@@ -507,18 +563,18 @@ function ImportView() {
         body: JSON.stringify({ url: trimmed }),
       });
       if (res.ok) {
-        const { transcript } = (await res.json()) as { transcript: string };
-        window.sessionStorage.setItem("visual-import-transcript", transcript);
-      } else {
-        // Non-TikTok or scrape failure — fall back to handing the raw link downstream.
-        window.sessionStorage.removeItem("visual-import-transcript");
+        const data = (await res.json()) as { transcript?: string; caption?: string };
+        transcript = data.transcript ?? "";
+        caption = data.caption;
       }
     } catch {
-      window.sessionStorage.removeItem("visual-import-transcript");
+      // Scrape failure — still create a project from the raw link.
     } finally {
-      window.sessionStorage.setItem("visual-import-link", trimmed);
+      // Auto-create a remix project and open its editor. This is the library entry.
+      const project = createProject({ importedLink: trimmed, transcript, caption });
+      saveProject(project);
       setImporting(false);
-      router.push("/remix");
+      router.push(`/remix/${project.id}`);
     }
   }
 
@@ -576,26 +632,139 @@ function ImportView() {
 }
 
 function LibraryView() {
+  const router = useRouter();
+  const [projects, setProjects] = useState<RemixProject[]>([]);
+
+  // localStorage is client-only — read after mount to avoid hydration mismatch.
+  useEffect(() => {
+    const handle = window.setTimeout(() => setProjects(listProjects()), 0);
+    return () => window.clearTimeout(handle);
+  }, []);
+
+  function removeProject(id: string) {
+    deleteProject(id);
+    setProjects(listProjects());
+  }
+
   return (
     <section className="min-h-screen min-w-0 px-4 py-10 lg:px-8">
       <div className="mx-auto w-full max-w-[1210px]">
-        <p className="text-sm text-[#81776f]">Workspace</p>
-        <h1 className="text-3xl font-semibold leading-tight">Library</h1>
-        <p className="mt-2 max-w-[940px] text-sm text-[#81776f]">
-          Saved character, character sheet, scene, video, and persona references. Attach them to any chat to keep
-          identity and look consistent across sessions.
-        </p>
-
-        <div className="mt-6 flex min-h-[165px] flex-col items-center justify-center rounded-xl border border-[#e0dbd4] bg-white px-8 text-center shadow-[0_8px_24px_rgba(35,28,22,0.12)]">
-          <Library aria-hidden className="h-9 w-9 text-[#c95f14]" />
-          <p className="mt-5 max-w-[880px] text-sm text-[#81776f]">
-            No saved references yet. In a Sandbox chat with Director Mode on, click Save to Library on a rendered
-            image to lock it in as a Character, Character Sheet, or Scene - or save a video render to keep the clip
-            alongside its spec.
-          </p>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-sm text-[#81776f]">Workspace</p>
+            <h1 className="text-3xl font-semibold leading-tight">All remixes</h1>
+            <p className="mt-2 max-w-[940px] text-sm text-[#81776f]">
+              Every video you&apos;ve imported and remixed. Open one to keep editing, or import a new source.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => router.push("/import")}
+            className="inline-flex items-center gap-2 rounded-md bg-[#c95f14] px-3 py-2 text-sm font-semibold text-white hover:bg-[#ad500f]"
+          >
+            <Upload aria-hidden className="h-4 w-4" />
+            Import a video
+          </button>
         </div>
+
+        {projects.length === 0 ? (
+          <div className="mt-6 flex min-h-[165px] flex-col items-center justify-center rounded-xl border border-[#e0dbd4] bg-white px-8 text-center shadow-[0_8px_24px_rgba(35,28,22,0.12)]">
+            <Library aria-hidden className="h-9 w-9 text-[#c95f14]" />
+            <p className="mt-5 max-w-[880px] text-sm text-[#81776f]">
+              No remixes yet. Import a video to scrape its transcript and start a new remix — it&apos;ll show up
+              here so you can come back to it.
+            </p>
+          </div>
+        ) : (
+          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {projects.map((project) => (
+              <RemixCard
+                key={project.id}
+                project={project}
+                onOpen={() => router.push(`/remix/${project.id}`)}
+                onDelete={() => removeProject(project.id)}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </section>
+  );
+}
+
+function RemixCard({
+  project,
+  onOpen,
+  onDelete,
+}: {
+  project: RemixProject;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className="group flex cursor-pointer flex-col rounded-xl border border-[#e0dbd4] bg-white text-left shadow-[0_8px_24px_rgba(35,28,22,0.08)] transition hover:border-[#d2a988] hover:shadow-[0_12px_30px_rgba(35,28,22,0.14)]"
+    >
+      <div className="flex aspect-video items-center justify-center overflow-hidden rounded-t-xl bg-[#ece9e6]">
+        {project.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={project.imageUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <Sparkles aria-hidden className="h-8 w-8 text-[#c0b6ad]" />
+        )}
+      </div>
+      <div className="flex flex-1 flex-col gap-2 p-4">
+        <span className="inline-flex w-fit items-center rounded-full bg-[#fff4ea] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#c2682b]">
+          {project.platform}
+        </span>
+        <h2 className="line-clamp-2 text-sm font-semibold leading-snug">{project.title}</h2>
+        <div className="mt-auto flex items-center justify-between text-xs text-[#9a8f86]">
+          <span>{formatTimestamp(project.updatedAt)}</span>
+          <button
+            type="button"
+            aria-label="Delete remix"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete();
+            }}
+            className="rounded-md p-1 text-[#b3a89f] opacity-0 transition hover:bg-[#f4efe9] hover:text-[#c0492b] group-hover:opacity-100"
+          >
+            <Trash2 aria-hidden className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatTimestamp(ms: number): string {
+  try {
+    return new Date(ms).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
+function latestAssistantRenderPrompt(messages: RemixMessage[]): string {
+  return (
+    [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant" && message.content.trim().length > 0)
+      ?.content.trim() ?? defaultRenderPrompt
   );
 }
 
@@ -808,7 +977,7 @@ function StudioSidebar({ currentView }: { currentView: StudioView }) {
           onClick={() => router.push("/import")}
         />
         <SidebarNavItem
-          label="Library"
+          label="Remixes"
           icon={Library}
           active={currentView === "library"}
           onClick={() => router.push("/library")}
@@ -878,33 +1047,45 @@ function SidebarNavItem({
 }
 
 function RemixHeader({
+  title,
+  subtitle,
+  activeTab,
+  onTabChange,
+  onBack,
+  hasImage,
   renderingImage,
   publishing,
-  hasImage,
   onGenerateImage,
   onMakePost,
   onPullAnalytics,
 }: {
+  title: string;
+  subtitle: string;
+  activeTab: RemixTab;
+  onTabChange: (tab: RemixTab) => void;
+  onBack: () => void;
+  hasImage: boolean;
   renderingImage: boolean;
   publishing: boolean;
-  hasImage: boolean;
   onGenerateImage: () => void;
   onMakePost: () => void;
   onPullAnalytics: () => void;
 }) {
   return (
     <header className="mx-auto w-full max-w-[1050px]">
-      <button type="button" className="mb-3 text-sm text-[#746a62] hover:text-[#211c18]">
+      <button
+        type="button"
+        onClick={onBack}
+        className="mb-3 text-sm text-[#746a62] hover:text-[#211c18]"
+      >
         &lt; All remixes
       </button>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="max-w-[900px] text-2xl font-semibold leading-tight md:text-3xl">
-            @Kai Cenat this is my Audition. Teacher, student, lunch lady just lmk and me and
+            {title}
           </h1>
-          <p className="mt-1 text-xs text-[#81776f]">
-            tiktok - @Kai Cenat this is my Audition. Teacher, student, lunch lady
-          </p>
+          <p className="mt-1 text-xs text-[#81776f]">{subtitle}</p>
         </div>
         <div className="flex items-center gap-2 rounded-md border border-[#e3b58e] bg-[#fff4ea] px-3 py-1.5 text-[10px] font-semibold uppercase text-[#c2682b]">
           <Lock aria-hidden className="h-3.5 w-3.5" />
@@ -913,37 +1094,52 @@ function RemixHeader({
       </div>
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex rounded-lg bg-[#ece9e6] p-1">
-          <TabButton icon={FileText} label="Source" active />
-          <TabButton icon={ImageIcon} label="Image" />
-          <TabButton icon={Video} label="Video" />
+          <TabButton
+            icon={FileText}
+            label="Source"
+            active={activeTab === "source"}
+            onClick={() => onTabChange("source")}
+          />
+          <TabButton
+            icon={ImageIcon}
+            label="Image"
+            active={activeTab === "image"}
+            onClick={() => onTabChange("image")}
+          />
+          <TabButton
+            icon={Video}
+            label="Video"
+            active={activeTab === "video"}
+            onClick={() => onTabChange("video")}
+          />
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={onGenerateImage}
             disabled={renderingImage}
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-[#c95f14] px-3 text-sm font-semibold text-white hover:bg-[#ad500f] disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md bg-[#c95f14] px-3 py-2 text-sm font-semibold text-white hover:bg-[#ad500f]"
           >
             {renderingImage ? (
               <Loader2 aria-hidden className="h-4 w-4 animate-spin" />
             ) : (
               <Sparkles aria-hidden className="h-4 w-4" />
             )}
-            {renderingImage ? "Rendering" : "Generate image"}
+            Generate image
           </button>
           <button
             type="button"
             onClick={onMakePost}
-            disabled={publishing || !hasImage}
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-[#d8c8bc] bg-white px-3 text-sm font-semibold text-[#6b5546] hover:bg-[#fff7f0] disabled:opacity-45"
+            disabled={!hasImage || publishing}
+            className="inline-flex items-center gap-2 rounded-md border border-[#dfcfc2] bg-white px-3 py-2 text-sm font-semibold text-[#4f4740] hover:border-[#c95f14] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {publishing ? <Loader2 aria-hidden className="h-4 w-4 animate-spin" /> : <Upload aria-hidden className="h-4 w-4" />}
-            {publishing ? "Posting" : "Make post"}
+            Make post
           </button>
           <button
             type="button"
             onClick={onPullAnalytics}
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-[#e0a371] bg-[#fff3ea] px-3 text-sm font-semibold text-[#b95c1f] hover:bg-white"
+            className="inline-flex items-center gap-2 rounded-md border border-[#dfcfc2] bg-white px-3 py-2 text-sm font-semibold text-[#4f4740] hover:border-[#c95f14]"
           >
             <BarChart3 aria-hidden className="h-4 w-4" />
             Get analytics
@@ -954,10 +1150,21 @@ function RemixHeader({
   );
 }
 
-function TabButton({ icon: Icon, label, active }: { icon: LucideIcon; label: string; active?: boolean }) {
+function TabButton({
+  icon: Icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
   return (
     <button
       type="button"
+      onClick={onClick}
       className={[
         "inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-semibold",
         active ? "bg-white text-[#211c18] shadow-sm" : "text-[#726860] hover:bg-white/70",
@@ -970,62 +1177,187 @@ function TabButton({ icon: Icon, label, active }: { icon: LucideIcon; label: str
 }
 
 function MediaStage({
+  activeTab,
+  project,
   imageUrl,
-  generated,
-  rendering,
+  renderPrompt,
+  renderingImage,
   renderStatus,
   publishStatus,
   exportStatus,
-  prompt,
 }: {
-  imageUrl: string;
-  generated: boolean;
-  rendering: boolean;
+  activeTab: RemixTab;
+  project: RemixProject | null;
+  imageUrl: string | undefined | null;
+  renderPrompt: string;
+  renderingImage: boolean;
   renderStatus: string;
   publishStatus: string | null;
   exportStatus: string | null;
-  prompt: string;
 }) {
+  const showFrameControls = activeTab === "image" && Boolean(imageUrl);
+
   return (
     <section className="mx-auto mt-4 w-full max-w-[1050px]">
       <div className="relative flex min-h-[560px] items-center justify-center bg-[#ebe8e4] px-4 py-5">
-        <div className="absolute right-4 top-4 z-10 flex gap-2">
-          <IconButton label="Favorite" icon={Star} />
-          <IconButton label="Download" icon={Download} />
-        </div>
-        <div
-          role="img"
-          aria-label="Creator leaning over a laptop in a production room"
-          className="relative aspect-[3/4] w-full max-w-[640px] overflow-hidden bg-[#1d2c2b] bg-cover bg-center shadow-[0_24px_70px_rgba(30,25,20,0.18)]"
-          style={{ backgroundImage: `url(${imageUrl})` }}
-        >
-          {rendering ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/35 text-white">
-              <div className="inline-flex items-center gap-2 rounded-md bg-black/45 px-3 py-2 text-sm font-semibold">
-                <Loader2 aria-hidden className="h-4 w-4 animate-spin" />
-                Rendering image
-              </div>
-            </div>
-          ) : null}
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-4 text-white">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="max-w-md text-sm font-semibold">
-                  {generated ? "Generated remix image" : "Locked character remix frame"}
-                </p>
-                <p className="mt-1 max-w-md truncate text-xs text-white/75">{prompt}</p>
-              </div>
-              <span className="shrink-0 rounded-md bg-white/15 px-2 py-1 text-xs">9:16</span>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs">
-              <span className="rounded-md bg-white/15 px-2 py-1">{renderStatus}</span>
-              {publishStatus ? <span className="rounded-md bg-white/15 px-2 py-1">{publishStatus}</span> : null}
-              {exportStatus ? <span className="rounded-md bg-white/15 px-2 py-1">{exportStatus}</span> : null}
-            </div>
+        {showFrameControls ? (
+          <div className="absolute right-4 top-4 z-10 flex gap-2">
+            <IconButton label="Favorite" icon={Star} />
+            <IconButton label="Download" icon={Download} />
           </div>
-        </div>
+        ) : null}
+        {activeTab === "source" ? (
+          <SourceStage project={project} />
+        ) : activeTab === "video" ? (
+          <VideoStage videoUrl={project?.videoUrl} />
+        ) : (
+          <ImageStage
+            imageUrl={imageUrl ?? undefined}
+            renderPrompt={renderPrompt}
+            renderingImage={renderingImage}
+            renderStatus={renderStatus}
+            publishStatus={publishStatus}
+            exportStatus={exportStatus}
+          />
+        )}
       </div>
     </section>
+  );
+}
+
+function SourceStage({ project }: { project: RemixProject | null }) {
+  const title = project?.title ?? DEMO_TITLE;
+  const platform = project?.platform ?? "tiktok";
+  const transcript = project?.transcript?.trim();
+  const importedLink = project?.importedLink;
+
+  return (
+    <div className="w-full max-w-[640px] rounded-lg border border-[#ddd7d0] bg-white p-6 shadow-[0_24px_70px_rgba(30,25,20,0.12)]">
+      <div className="flex items-center gap-2 text-[#9c4f24]">
+        <FileText aria-hidden className="h-4 w-4" />
+        <p className="text-xs font-semibold uppercase tracking-wide">Source transcript</p>
+      </div>
+      <h3 className="mt-3 text-base font-semibold leading-snug text-[#211c18]">{title}</h3>
+      {importedLink ? (
+        <a
+          href={importedLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 inline-block break-all text-xs text-[#9c4f24] hover:underline"
+        >
+          {importedLink}
+        </a>
+      ) : null}
+
+      {transcript ? (
+        <p className="mt-4 max-h-[340px] overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[#5c554f]">
+          {transcript}
+        </p>
+      ) : (
+        <p className="mt-4 text-sm leading-6 text-[#857a70]">
+          No transcript was captured for this {platform} source. Refine the source in the chat to shape the render
+          prompt before moving to the Image and Video tabs.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ImageStage({
+  imageUrl,
+  renderPrompt,
+  renderingImage,
+  renderStatus,
+  publishStatus,
+  exportStatus,
+}: {
+  imageUrl: string | undefined;
+  renderPrompt: string;
+  renderingImage: boolean;
+  renderStatus: string;
+  publishStatus: string | null;
+  exportStatus: string | null;
+}) {
+  if (!imageUrl) {
+    return (
+      <div className="flex aspect-[3/4] w-full max-w-[640px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-[#cfc7be] bg-[#f3f0ec] px-8 text-center text-[#857a70]">
+        {renderingImage ? (
+          <Loader2 aria-hidden className="h-8 w-8 animate-spin text-[#c95f14]" />
+        ) : (
+          <ImageIcon aria-hidden className="h-8 w-8 text-[#c0b6ad]" />
+        )}
+        <p className="text-sm font-semibold text-[#5c554f]">No image yet</p>
+        <p className="max-w-xs text-xs">
+          Tune the prompt in the chat, then hit Generate image to render the first still for this remix.
+        </p>
+        <p className="rounded-md bg-white px-2 py-1 text-[11px] font-semibold text-[#9c4f24]">
+          {renderStatus}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      role="img"
+      aria-label="Generated remix frame"
+      className="relative aspect-[3/4] w-full max-w-[640px] overflow-hidden bg-[#1d2c2b] bg-cover bg-center shadow-[0_24px_70px_rgba(30,25,20,0.18)]"
+      style={{ backgroundImage: `url(${imageUrl})` }}
+    >
+      {renderingImage ? (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/35 text-white">
+          <span className="inline-flex items-center gap-2 rounded-md bg-black/55 px-3 py-2 text-sm font-semibold">
+            <Loader2 aria-hidden className="h-4 w-4 animate-spin" />
+            Rendering
+          </span>
+        </div>
+      ) : null}
+      <div className="absolute left-4 top-4 z-10 flex max-w-[90%] flex-wrap gap-2">
+        <StatusChip label={renderStatus} />
+        {publishStatus ? <StatusChip label={publishStatus} /> : null}
+        {exportStatus ? <StatusChip label={exportStatus} /> : null}
+      </div>
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-4 text-white">
+        <div className="flex items-center justify-between gap-3">
+          <p className="line-clamp-2 max-w-md text-sm font-semibold">
+            {renderPrompt || "Generated remix frame"}
+          </p>
+          <span className="rounded-md bg-white/15 px-2 py-1 text-xs">9:16</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusChip({ label }: { label: string }) {
+  return (
+    <span className="rounded-md bg-white/90 px-2 py-1 text-[11px] font-semibold text-[#4f4740] shadow-sm">
+      {label}
+    </span>
+  );
+}
+
+function VideoStage({ videoUrl }: { videoUrl: string | undefined }) {
+  if (videoUrl) {
+    return (
+      <div className="relative aspect-[3/4] w-full max-w-[640px] overflow-hidden bg-black shadow-[0_24px_70px_rgba(30,25,20,0.18)]">
+        <video src={videoUrl} controls playsInline className="h-full w-full object-contain" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative aspect-[3/4] w-full max-w-[640px] overflow-hidden rounded-lg bg-[#13100d] shadow-[0_24px_70px_rgba(30,25,20,0.18)]">
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white">
+        <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur">
+          <Play aria-hidden className="h-7 w-7" />
+        </span>
+        <p className="text-sm font-semibold">Video render slot</p>
+        <p className="max-w-xs text-center text-xs text-white/70">
+          Generate an image first, then render a single short clip from this remix.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -1045,17 +1377,20 @@ function IconButton({ label, icon: Icon }: { label: string; icon: LucideIcon }) 
 function RemixChatPanel({
   messages,
   running,
+  modelConfig,
   analyticsProgram,
   onSend,
 }: {
   messages: RemixMessage[];
   running: boolean;
+  modelConfig: RuntimeModelConfig | null;
   analyticsProgram: string | null;
   onSend: (prompt: string) => void;
 }) {
   const [quickPrompt, setQuickPrompt] = useState("");
   const [artifactErrors, setArtifactErrors] = useState<OpenUIError[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const agentModel = modelConfig?.agent.modelId;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -1084,6 +1419,15 @@ function RemixChatPanel({
           <button type="button" className="text-[#c95f14] hover:underline">
             + Create one
           </button>
+        </div>
+        <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-[#80766e]">
+          <span>Trace:</span>
+          <span className="rounded-md bg-[#f4f1ee] px-2 py-1">
+            {modelConfig?.agent.apiMode ?? "loading"}
+          </span>
+          <span className="min-w-0 flex-1 truncate" title={agentModel ?? "Loading model"}>
+            {agentModel ?? "Loading model"}
+          </span>
         </div>
       </div>
 
@@ -1169,6 +1513,7 @@ function RemixChatPanel({
 
 function ChatBubble({ message, first }: { message: RemixMessage; first: boolean }) {
   const assistant = message.role === "assistant";
+  const modelLabel = assistant ? "response" : "request";
 
   return (
     <div
@@ -1182,7 +1527,7 @@ function ChatBubble({ message, first }: { message: RemixMessage; first: boolean 
       <p>{message.content}</p>
       {message.model ? (
         <p className={assistant && !first ? "mt-2 text-xs text-[#82766d]" : "mt-2 text-xs text-white/70"}>
-          {message.model}
+          {modelLabel}: {message.model}
           {message.mocked ? " fallback" : ""}
         </p>
       ) : null}
@@ -1193,11 +1538,13 @@ function ChatBubble({ message, first }: { message: RemixMessage; first: boolean 
 function Composer({
   value,
   running,
+  modelConfig,
   onChange,
   onSubmit,
 }: {
   value: string;
   running: boolean;
+  modelConfig: RuntimeModelConfig | null;
   onChange: (value: string) => void;
   onSubmit: () => void;
 }) {
@@ -1221,9 +1568,12 @@ function Composer({
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <ModeChip icon={Sparkles} label="Director" active />
         <ModeChip icon={FileText} label="Script" />
-        <span className="ml-auto inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs font-medium text-[#736960]">
+        <span
+          className="ml-auto inline-flex h-8 min-w-0 max-w-[260px] items-center gap-2 rounded-md px-2 text-xs font-medium text-[#736960]"
+          title={modelConfig?.agent.modelId ?? "Loading model"}
+        >
           <Bot aria-hidden className="h-4 w-4" />
-          gpt-5.4 mini
+          <span className="min-w-0 truncate">{modelConfig?.agent.modelId ?? "Loading model"}</span>
         </span>
         <button
           type="button"
