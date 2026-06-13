@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { recordChatHistoryEvent } from "@/lib/analytics/chat-history";
-import { publishAd } from "@/lib/composio/publish";
+import {
+  preparePublishDryRun,
+  publishAd,
+  type PublishTarget,
+} from "@/lib/composio/publish";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { title, hook, cta, videoUrl, imageUrl, targets, dryRun } = body;
-    const publishTargets = targets ?? ["instagram"];
+    const publishTargets = normalizePublishTargets(targets);
 
     if (!title || !hook || !cta) {
       return NextResponse.json(
@@ -16,30 +19,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (dryRun) {
-      const result = {
-        ok: true,
-        dryRun: true,
-        detail: `dry-run post prepared for "${title}" to ${publishTargets.join(", ")}`,
-        tiktok: publishTargets.includes("tiktok") ? { publish_id: "dry_run_pub_id" } : undefined,
-        instagram: publishTargets.includes("instagram") ? { media_id: "dry_run_media_id" } : undefined,
-      };
-
-      await recordChatHistoryEvent({
-        sessionId: "visual-remix-demo",
-        surface: "remix",
-        eventType: "artifact_render",
-        role: "assistant",
-        model: "composio-dry-run",
-        provider: "composio",
-        prompt: `${hook}\n\n${cta}`,
-        response: result.detail,
-        artifactType: "PublishDraft",
-        qualityLabel: "publish_draft",
-        action: "dry_run_publish",
-        mocked: true,
-        live: false,
-        metadata: { title, targets: publishTargets, hasVideo: !!videoUrl, hasImage: !!imageUrl },
-      });
+      const result = await preparePublishDryRun(
+        { title, hook, cta, videoUrl: videoUrl ?? null, imageUrl: imageUrl ?? null },
+        publishTargets,
+        {
+          sessionId: "visual-remix-demo",
+          surface: "remix",
+        }
+      );
 
       return NextResponse.json(result);
     }
@@ -57,4 +44,13 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+function normalizePublishTargets(targets: unknown): PublishTarget[] {
+  if (!Array.isArray(targets)) return ["instagram"];
+
+  const normalized = targets.filter((target): target is PublishTarget =>
+    target === "instagram" || target === "tiktok"
+  );
+  return normalized.length > 0 ? normalized : ["instagram"];
 }

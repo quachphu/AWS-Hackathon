@@ -4,7 +4,9 @@
 
 ![VisualLabs full walkthrough](docs/assets/visual-labs-full-flow.gif)
 
-Flow: home page -> Studio / Remix -> prompt refinement -> image render -> dry-run publish -> live analytics -> ClickHouse/Fastino training export.
+Current GIF coverage: home page -> Studio / Remix -> prompt refinement -> image render -> dry-run publish -> live analytics -> ClickHouse/Fastino training export.
+
+Updated full flow to capture next: home page -> Import -> `/api/ingest` Apify transcript/reference analysis -> `/remix/{id}` -> agent prompt refinement -> `render_image` / `submit_video` / `poll_video` tools -> `prepare_publish_dry_run` -> live analytics -> `export_training_dataset` -> ClickHouse/Fastino training records.
 
 Generated with [HomenShum/feature-walkthrough-gif](https://github.com/HomenShum/feature-walkthrough-gif).
 
@@ -28,7 +30,7 @@ Making a video ad still means juggling disconnected tools and never knowing what
 
 VisualLabs starts with a creator prompt, imported Instagram Reels link, or transcript-style idea. The system then helps produce a short-form ad concept with a hook, CTA, pacing, and visual direction. From there, the creator can:
 
-1. **Chat with the remix agent** - the right-side remix chat behaves like a creative director. It improves prompts, preserves character consistency, rewrites hooks, and decides the next production action.
+1. **Chat with the harnessed remix agent** - the right-side remix chat behaves like a creative director with safe production tools. It improves prompts, preserves character consistency, rewrites hooks, can call image/video render tools, prepares publish dry-runs, and exports training data.
 2. **Inspect OpenUI artifacts** - generated prompts, analytics, and training-loop updates appear as compact chat artifacts that can expand into a review panel.
 3. **Generate live stills** - the image button calls the render API from the current prompt and swaps the result into the image stage.
 4. **Queue video rendering** - video is designed as an async submit-and-poll job so the demo does not block on long provider latency.
@@ -123,7 +125,7 @@ Status: deployment is live; durable Render Workflow agent jobs are documented as
 **OpenAI Agents SDK - agent orchestration**
 Why: The app needs an agent that can reason over a prompt, call tools, summarize analytics, and decide what UI artifact should be shown. The OpenAI Agents SDK gives us that orchestration layer while TrueFoundry remains the gateway story for governed model access.
 
-How it fits: The Instagram analytics agent uses a tool to fetch Composio Instagram data, then returns a summary and OpenUI artifact program. The remix agent refines image/video prompts and keeps rendering/publishing as explicit separate actions. Evidence: `lib/openai/instagram-analytics-agent.ts`, `lib/openai/training-pipeline-agent.ts`, `lib/openai/remix-agent.ts`, and `app/api/agent/*`.
+How it fits: The Instagram analytics agent uses a tool to fetch Composio Instagram data, then returns a summary and OpenUI artifact program. The remix agent is now the harnessed agent: it refines image/video prompts and can call safe tools for image render, async video submit/poll, publish dry-run preparation, and training dataset export. Live publishing remains an explicit approval path outside the chat tool. Evidence: `lib/openai/instagram-analytics-agent.ts`, `lib/openai/training-pipeline-agent.ts`, `lib/openai/remix-agent.ts`, `lib/openai/harnessed-agent-tools.ts`, and `app/api/agent/*`.
 
 ### How we built it
 
@@ -142,17 +144,19 @@ Core technical flow:
 ```txt
 User enters a topic or imported source link
   -> /api/ingest or /api/draft
+  -> Apify source import when an Instagram Reel is provided
   -> TrueFoundry gateway / OpenAI-compatible model path
   -> base model or Fastino/Pioneer model
   -> schema-valid draft or refined render prompt
   -> OpenUI remix workspace renders the result
-  -> /api/render kind="image"
+  -> /api/agent/chat with harnessed agent tools
+  -> render_image or /api/render kind="image"
   -> Fal Seedream or mock image path
-  -> /api/render kind="video"
+  -> submit_video + poll_video or /api/render kind="video"
   -> Fal async job or mock video path
-  -> /api/publish
+  -> prepare_publish_dry_run or /api/publish
   -> Composio publish or dry-run fallback
-  -> /api/analytics/history + /api/analytics/export
+  -> export_training_dataset or /api/analytics/export
   -> ClickHouse events and Fastino/Pioneer JSONL records
 ```
 
@@ -192,6 +196,7 @@ We also learned that async video needs choreography. Image generation can be the
 ### What's next for VisualLabs
 
 - Wire the remix agent to retrieve from the seeded Senso AI knowledge base before draft and prompt generation.
+- Promote the harnessed agent as a Render-hosted MCP/action service that can run source import, reference analysis, remix, generation, publish preparation, analytics, ClickHouse aggregation, and training export end to end.
 - Keep publishing high-quality citeables to `cited.md` so VisualLabs has public, source-grounded pages for GEO monitoring and AI citation.
 - Add TikTok analytics ingestion into ClickHouse.
 - Expand OpenUI artifacts into storyboard, analytics, and judge-readiness artifacts.

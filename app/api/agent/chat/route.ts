@@ -1,11 +1,8 @@
 import {
-  currentResponsesApiSettings,
   fallbackRemixResponse,
-  getAgentApiMode,
   getAgentModel,
   getAgentProvider,
   getOpenAIApiKey,
-  getOpenAIBaseUrl,
   runRemixAgent,
   transcriptFromMessages,
   type RemixAgentMessage,
@@ -24,8 +21,9 @@ export async function POST(req: Request) {
   const model = getAgentModel();
   const provider = getAgentProvider();
   const prompt = latestUserPrompt(messages);
+  const shouldUseHarnessedAgent = isHarnessedToolRequest(input);
 
-  if (isTrainingPipelineRequest(input)) {
+  if (!shouldUseHarnessedAgent && isTrainingPipelineRequest(input)) {
     try {
       const pipeline = await runTrainingPipelineAgent();
       await recordChatHistoryEvent({
@@ -73,7 +71,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (isInstagramAnalyticsRequest(input)) {
+  if (!shouldUseHarnessedAgent && isInstagramAnalyticsRequest(input)) {
     try {
       const analytics = await runInstagramAnalyticsAgent();
       await recordChatHistoryEvent({
@@ -144,96 +142,28 @@ export async function POST(req: Request) {
   }
 
   try {
-    if (getAgentApiMode() === "chat_completions") {
-      const result = await runRemixAgent(messages);
-      return openAIResponsesTextStream(result.output, () =>
-        recordChatHistoryEvent({
-          sessionId: "openui-agent-demo",
-          surface: "agent",
-          eventType: "chat_turn",
-          role: "assistant",
-          model: result.model,
-          provider: result.provider,
-          prompt,
-          response: result.output,
-          artifactType: "RemixPromptArtifact",
-          qualityLabel: "image_prompt",
-          action: "agent_chat_agents_sdk",
-          mocked: result.mocked,
-          live: !result.mocked,
-          metadata: {
-            agentApiMode: result.agentApiMode,
-          },
-        })
-      );
-    }
-
-    const upstream = await fetch(`${getOpenAIBaseUrl()}/responses`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        instructions: [
-          "You are Harness Remix Director inside an OpenUI fullscreen chat.",
-          "Help improve TikTok-first remix prompts and return concise production guidance.",
-          "When useful, emit compact OpenUI-friendly language and mention artifact-worthy prompt details.",
-          "Do not claim render or publish completion.",
-        ].join("\n"),
-        input,
-        stream: true,
-        ...currentResponsesApiSettings(model),
-      }),
-      signal: req.signal,
-    });
-
-    if (!upstream.ok || !upstream.body) {
-      const detail = await upstream.text().catch(() => upstream.statusText);
-      const text = `${fallbackRemixResponse(input)}\n\nOpenAI stream note: ${detail}`;
-      return openAIResponsesTextStream(text, () =>
-        recordChatHistoryEvent({
-          sessionId: "openui-agent-demo",
-          surface: "agent",
-          eventType: "chat_turn",
-          role: "assistant",
-          model,
-          provider,
-          prompt,
-          response: text,
-          artifactType: "RemixPromptArtifact",
-          qualityLabel: "image_prompt",
-          action: "agent_chat_openai_error",
-          mocked: true,
-          live: false,
-        })
-      );
-    }
-
-    return new Response(streamWithHistory(upstream.body, (response) =>
+    const result = await runRemixAgent(messages);
+    return openAIResponsesTextStream(result.output, () =>
       recordChatHistoryEvent({
         sessionId: "openui-agent-demo",
         surface: "agent",
         eventType: "chat_turn",
         role: "assistant",
-        model,
-        provider,
+        model: result.model,
+        provider: result.provider,
         prompt,
-        response,
+        response: result.output,
         artifactType: "RemixPromptArtifact",
         qualityLabel: "image_prompt",
-        action: "agent_chat_response",
-        mocked: false,
-        live: true,
+        action: "agent_chat_harnessed_agent",
+        mocked: result.mocked,
+        live: !result.mocked,
+        metadata: {
+          agentApiMode: result.agentApiMode,
+          toolEnabled: true,
+        },
       })
-    ), {
-      status: upstream.status,
-      headers: {
-        "Cache-Control": "no-cache, no-transform",
-        "Content-Type": "text/event-stream",
-      },
-    });
+    );
   } catch (error) {
     const detail = error instanceof Error ? error.message : "stream failed";
     const text = `${fallbackRemixResponse(input)}\n\nOpenAI stream note: ${detail}`;
@@ -271,6 +201,27 @@ function isTrainingPipelineRequest(input: string) {
       normalized.includes("prompt") ||
       normalized.includes("analytics") ||
       normalized.includes("dataset"))
+  );
+}
+
+function isHarnessedToolRequest(input: string) {
+  const normalized = input.toLowerCase();
+  return (
+    normalized.includes("render_image") ||
+    normalized.includes("submit_video") ||
+    normalized.includes("poll_video") ||
+    normalized.includes("prepare_publish_dry_run") ||
+    normalized.includes("export_training_dataset") ||
+    ((normalized.includes("render") || normalized.includes("generate")) && normalized.includes("image")) ||
+    ((normalized.includes("submit") ||
+      normalized.includes("queue") ||
+      normalized.includes("render") ||
+      normalized.includes("poll")) &&
+      normalized.includes("video")) ||
+    ((normalized.includes("publish") || normalized.includes("post")) &&
+      (normalized.includes("dry-run") || normalized.includes("dry run") || normalized.includes("prepare"))) ||
+    (normalized.includes("export") &&
+      (normalized.includes("dataset") || normalized.includes("jsonl") || normalized.includes("training")))
   );
 }
 
@@ -357,53 +308,6 @@ function openAIResponsesTextStream(text: string, onComplete?: (text: string) => 
       },
     }
   );
-}
-
-function streamWithHistory(body: ReadableStream<Uint8Array>, onComplete: (text: string) => void | Promise<unknown>) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let captured = "";
-
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      const { value, done } = await reader.read();
-      if (done) {
-        if (buffer) captured += parseResponseTextFromSse(buffer);
-        controller.close();
-        void onComplete(captured);
-        return;
-      }
-
-      controller.enqueue(value);
-      buffer += decoder.decode(value, { stream: true });
-      const blocks = buffer.split("\n\n");
-      buffer = blocks.pop() ?? "";
-      for (const block of blocks) {
-        captured += parseResponseTextFromSse(block);
-      }
-    },
-    cancel(reason) {
-      return reader.cancel(reason);
-    },
-  });
-}
-
-function parseResponseTextFromSse(block: string) {
-  const dataLine = block
-    .split("\n")
-    .find((line) => line.startsWith("data: "))
-    ?.slice(6)
-    .trim();
-
-  if (!dataLine || dataLine === "[DONE]") return "";
-
-  try {
-    const event = JSON.parse(dataLine) as { type?: string; delta?: unknown };
-    return event.type === "response.output_text.delta" && typeof event.delta === "string" ? event.delta : "";
-  } catch {
-    return "";
-  }
 }
 
 function enqueueResponseEvent(

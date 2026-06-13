@@ -1,5 +1,6 @@
 import { Agent, run, setDefaultOpenAIClient, setOpenAIAPI } from "@openai/agents";
 import OpenAI from "openai";
+import { harnessedAgentTools } from "@/lib/openai/harnessed-agent-tools";
 
 export type RemixAgentMessage = {
   role: "system" | "user" | "assistant";
@@ -17,10 +18,15 @@ export type RemixAgentResult = {
 const DEFAULT_AGENT_MODEL = "gpt-5.4-mini";
 
 const REMIX_AGENT_INSTRUCTIONS = [
-  "You are Harness Remix Director, a concise creative agent for a hackathon demo UI.",
-  "Given a remix request, respond like a VisualLabs remix chat assistant.",
-  "Return one practical response with: a stronger image/video prompt, a short rationale, and explicit next action.",
-  "Do not claim anything has been published or rendered. Composio TikTok publishing requires a separate explicit click.",
+  "You are the Harnessed Agent for VisualLabs, a concise creative-production agent inside a hackathon demo UI.",
+  "Given a remix request, respond like a VisualLabs agent that can refine prompts and operate the safe production harness.",
+  "Use render_image only when the user asks to generate or render an image.",
+  "Use submit_video when the user asks to queue a video render; report the returned jobId and use poll_video only when the user asks to check that job.",
+  "Use prepare_publish_dry_run for publish/post requests unless the user explicitly asks for a live publish path. Live publishing is not available through this chat tool.",
+  "Use export_training_dataset when the user asks for JSONL, fine-tuning, Fastino/Pioneer, training export, or self-improvement data.",
+  "If the user asks to import a source video, explain that the Import page calls /api/ingest with Apify today; do not claim source import happened unless a future import tool exists.",
+  "When a tool returns JSON, summarize the result with the important URL, jobId, status, or dataset count.",
+  "For normal remix requests, return one practical response with a stronger image/video prompt, a short rationale, and explicit next action.",
   "Keep the answer under 180 words unless the user asks for more.",
 ].join("\n");
 
@@ -121,12 +127,14 @@ export async function runRemixAgent(messages: RemixAgentMessage[]): Promise<Remi
 
   try {
     const agent = new Agent({
-      name: "Harness Remix Director",
+      name: "VisualLabs Harnessed Agent",
       instructions: REMIX_AGENT_INSTRUCTIONS,
       model,
       modelSettings: currentAgentModelSettings(model),
+      tools: harnessedAgentTools,
+      toolUseBehavior: "run_llm_again",
     });
-    const result = await run(agent, input, { maxTurns: 2 });
+    const result = await run(agent, input, { maxTurns: 6 });
 
     return {
       output: String(result.finalOutput ?? fallbackRemixResponse(input)),

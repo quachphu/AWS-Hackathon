@@ -1,5 +1,8 @@
 import { Composio } from "@composio/core";
+import { recordChatHistoryEvent, type ChatSurface } from "@/lib/analytics/chat-history";
 import { getComposioApiKey, getComposioToolExecutionCommon } from "@/lib/composio/config";
+
+export type PublishTarget = "tiktok" | "instagram";
 
 export type PublishInput = {
   title: string;
@@ -14,6 +17,10 @@ export type PublishResult = {
   detail: string;
   tiktok?: { publish_id?: string };
   instagram?: { media_id?: string };
+};
+
+export type PublishDryRunResult = PublishResult & {
+  dryRun: true;
 };
 
 type UnknownRecord = Record<string, unknown>;
@@ -89,7 +96,7 @@ async function publishToInstagram(input: PublishInput): Promise<PublishResult["i
 
 export async function publishAd(
   input: PublishInput,
-  targets: ("tiktok" | "instagram")[] = ["instagram"]
+  targets: PublishTarget[] = ["instagram"]
 ): Promise<PublishResult> {
   const validationErrors = validatePublishInput(input, targets);
   if (validationErrors.length > 0) {
@@ -139,7 +146,45 @@ export async function publishAd(
   };
 }
 
-function validatePublishInput(input: PublishInput, targets: ("tiktok" | "instagram")[]) {
+export async function preparePublishDryRun(
+  input: PublishInput,
+  targets: PublishTarget[] = ["instagram"],
+  options: { sessionId?: string; surface?: ChatSurface } = {}
+): Promise<PublishDryRunResult> {
+  const result: PublishDryRunResult = {
+    ok: true,
+    dryRun: true,
+    detail: `dry-run post prepared for "${input.title}" to ${targets.join(", ")}`,
+    tiktok: targets.includes("tiktok") ? { publish_id: "dry_run_pub_id" } : undefined,
+    instagram: targets.includes("instagram") ? { media_id: "dry_run_media_id" } : undefined,
+  };
+
+  await recordChatHistoryEvent({
+    sessionId: options.sessionId ?? "visual-remix-demo",
+    surface: options.surface ?? "remix",
+    eventType: "artifact_render",
+    role: "assistant",
+    model: "composio-dry-run",
+    provider: "composio",
+    prompt: `${input.hook}\n\n${input.cta}`,
+    response: result.detail,
+    artifactType: "PublishDraft",
+    qualityLabel: "publish_draft",
+    action: "dry_run_publish",
+    mocked: true,
+    live: false,
+    metadata: {
+      title: input.title,
+      targets,
+      hasVideo: !!input.videoUrl,
+      hasImage: !!input.imageUrl,
+    },
+  });
+
+  return result;
+}
+
+function validatePublishInput(input: PublishInput, targets: PublishTarget[]) {
   const errors: string[] = [];
 
   if (targets.includes("tiktok") && !input.videoUrl) {
