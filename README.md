@@ -70,7 +70,17 @@ Why: Visual output quality depends on memory: brand voice, creator style, produc
 
 How it fits: Senso sits before prompt generation as the retrieval/context source for "what should this brand sound and look like?" In repo terms, it maps to the cited-context inputs that feed import, remix chat, prompt refinement, and the future training examples. We intentionally keep this out of a transactional app database; it is knowledge/context, not product auth or customer state.
 
-Status: documented as the context lane. A full Senso connector or `cited.md` knowledge file is the next integration point; the current demo uses imported source text and mock-safe context.
+How we used it for this demo: we seeded the `harness4visual` Senso org with a brand kit, four content types, a product line, competitor context, 40 GEO prompts, and sourced knowledge-base docs about the live VisualLabs/Harness Remix Studio workflow. Senso then generated draft explainers from that knowledge base and published three sample citeables to `cited.md`.
+
+Why `cited.md`: the app should not rely only on private prompt context. Published citeables give search engines and AI systems stable, source-grounded URLs that explain what VisualLabs does, how it compares with adjacent tools, and what evidence supports the product story. That matters for GEO: if ChatGPT, Claude, Perplexity, or Gemini are asked about the product category, there are now public pages they can discover and cite instead of guessing from sparse app UI text.
+
+Live citeables:
+
+- [What public evidence shows how Harness Remix Studio works?](https://cited.md/article/what-public-evidence-shows-how-harness-remix-studio-works)
+- [How does Harness Remix Studio compare with Canva AI Video Generator?](https://cited.md/article/how-does-harness-remix-studio-compare-with-canva-ai-video-generator)
+- [What tools help keep a character consistent across AI-generated social assets?](https://cited.md/article/what-tools-help-keep-a-character-consistent-across-ai-generated)
+
+Status: the external Senso knowledge system and `cited.md` publishing surface are live. The app runtime still uses imported source text and mock-safe context; the next engineering step is to wire the remix agent to retrieve from Senso directly before draft and prompt generation.
 
 **TrueFoundry - AI gateway and model routing**
 Why: Model calls should not be scattered direct provider calls. TrueFoundry gives the system one governed gateway for model routing, env-based swaps, fallback behavior, and provider separation. This is what lets the same remix agent use OpenAI locally and route through the gateway in production.
@@ -179,7 +189,8 @@ We also learned that async video needs choreography. Image generation can be the
 
 ### What's next for VisualLabs
 
-- Connect real Senso AI context inputs for trend/source selection.
+- Wire the remix agent to retrieve from the seeded Senso AI knowledge base before draft and prompt generation.
+- Keep publishing high-quality citeables to `cited.md` so VisualLabs has public, source-grounded pages for GEO monitoring and AI citation.
 - Add TikTok analytics ingestion into ClickHouse.
 - Expand OpenUI artifacts into storyboard, analytics, and judge-readiness artifacts.
 - Add a real approval gate before Composio publish.
