@@ -1,6 +1,6 @@
 # Ad Factory
 
-Sponsor-powered ad production line: **topic/transcript → structured draft (Pioneer via TrueFoundry) → images (Replicate) → video (Fal) → published (Composio)** — instrumented for cost in **ClickHouse** the whole way.
+Sponsor-powered ad production line: **topic/transcript → structured draft (Pioneer via TrueFoundry) → images/video (Fal) → published (Composio)** — instrumented for cost in **ClickHouse** the whole way.
 
 **Required reading:** [CLAUDE.md](CLAUDE.md) (what we're building, cut order, demo choreography) · [CONTRIBUTION.md](CONTRIBUTION.md) (lanes, git flow, mock-first discipline).
 

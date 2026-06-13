@@ -8,7 +8,7 @@
 // What's left is the whole job: submit → poll → mirror to Cloudinary → return a URL.
 //
 // DEPENDENCIES: only `cloudinary`. No DB, no auth, no app context.
-// ENV: REPLICATE_API_TOKEN (image), FAL_KEY (video), CLOUDINARY_URL (mirror).
+// ENV: FAL_KEY (image + video), CLOUDINARY_URL (mirror).
 //
 // CONTRACT for the rest of the team:
 //   - generateImage()  → LIVE. Returns a Cloudinary URL in seconds. Call it inline.
@@ -23,18 +23,18 @@
 
 // ---------------------------------------------------------------------------
 // Cost (for ClickHouse — B's money chart reads this).
-// Rough provider rates; confirm against Replicate/Fal dashboards before the
+// Rough provider rates; confirm against Fal dashboards before the
 // demo. Returned on every render so the logging layer has a number to insert.
 // ---------------------------------------------------------------------------
-const IMAGE_COST_USD = 0.03; // Seedream 4.5, 2K, per image
+const IMAGE_COST_USD = 0.04; // Fal Seedream 4.5, 2K, per image
 const VIDEO_COST_USD_PER_SEC = 0.12; // Seedance 2.0, 720p, per second
 
 // ---------------------------------------------------------------------------
 // Cloudinary mirror — replaces the VisualLabs Blob mirror (we host on Render,
-// not Vercel). Provider artifact URLs (replicate.delivery / fal.media) expire
+// not Vercel). Provider artifact URLs expire
 // in minutes; this re-hosts them on Cloudinary's CDN so a returned URL is safe
 // to store and show. Cloudinary fetches the provider URL server-side, so we
-// don't download the bytes ourselves — one call does the whole mirror.
+// don't download the bytes ourselves - one call does the whole mirror.
 //
 // ENV: CLOUDINARY_URL = cloudinary://<api_key>:<api_secret>@<cloud_name>
 // The SDK auto-reads CLOUDINARY_URL on import; we guard + lazy-import it here so
@@ -61,30 +61,27 @@ async function mirrorToCloudinary(args: {
   return { url: res.secure_url };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+const FAL_RUN_BASE = "https://fal.run";
+const FAL_QUEUE_BASE = "https://queue.fal.run";
+
+function falAuth(): string {
+  const key = process.env.FAL_KEY;
+  if (!key) throw new Error("FAL_KEY is not set");
+  return `Key ${key}`;
 }
 
 // ===========================================================================
-// IMAGE — Replicate Seedream 4.5. LIVE / synchronous (submit + poll inline).
+// IMAGE — Fal Seedream 4.5. LIVE / synchronous.
 // Returns in a few seconds. This is the one you run live on stage.
 // ===========================================================================
 
-const REPLICATE_BASE = "https://api.replicate.com/v1";
-const SEEDREAM_MODEL = "bytedance/seedream-4.5";
-export const IMAGE_PROVIDER = `replicate/${SEEDREAM_MODEL}`;
+const SEEDREAM_TEXT_TO_IMAGE_ENDPOINT = "fal-ai/bytedance/seedream/v4.5/text-to-image";
+const SEEDREAM_EDIT_ENDPOINT = "fal-ai/bytedance/seedream/v4.5/edit";
+export const IMAGE_PROVIDER = `fal/${SEEDREAM_TEXT_TO_IMAGE_ENDPOINT}`;
 
-interface ReplicatePrediction {
-  id?: string;
-  status?: "starting" | "processing" | "succeeded" | "failed" | "canceled" | string;
-  output?: string | string[] | null;
-  error?: string | null;
-}
-
-function replicateAuth(): string {
-  const key = process.env.REPLICATE_API_TOKEN;
-  if (!key) throw new Error("REPLICATE_API_TOKEN is not set");
-  return `Bearer ${key}`;
+interface FalImageResponse {
+  images?: Array<{ url?: string }>;
+  seed?: number;
 }
 
 export interface ImageResult {
@@ -97,59 +94,43 @@ export async function generateImage(
   prompt: string,
   opts: { referenceImageUrls?: string[]; aspectRatio?: "9:16" | "16:9" | "1:1" } = {}
 ): Promise<ImageResult> {
-  // 1. Submit
-  const input: Record<string, unknown> = {
-    prompt,
-    size: "2K",
-    aspect_ratio: opts.aspectRatio ?? "9:16",
-  };
   const refs = (opts.referenceImageUrls ?? []).slice(0, 10);
-  if (refs.length) input.image_input = refs;
+  const endpoint = refs.length ? SEEDREAM_EDIT_ENDPOINT : SEEDREAM_TEXT_TO_IMAGE_ENDPOINT;
+  const body: Record<string, unknown> = {
+    prompt,
+    image_size: imageSizeForAspectRatio(opts.aspectRatio ?? "9:16"),
+    num_images: 1,
+    max_images: 1,
+    sync_mode: false,
+    enable_safety_checker: true,
+  };
+  if (refs.length) body.image_urls = refs;
 
-  const submit = await fetch(
-    `${REPLICATE_BASE}/models/${SEEDREAM_MODEL}/predictions`,
-    {
-      method: "POST",
-      headers: { Authorization: replicateAuth(), "Content-Type": "application/json" },
-      body: JSON.stringify({ input }),
-    }
-  );
-  if (!submit.ok) {
-    const txt = await submit.text().catch(() => "");
-    throw new Error(`Seedream submit failed (${submit.status}): ${txt.slice(0, 300)}`);
+  const res = await fetch(`${FAL_RUN_BASE}/${endpoint}`, {
+    method: "POST",
+    headers: { Authorization: falAuth(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`Seedream submit failed (${res.status}): ${txt.slice(0, 300)}`);
   }
-  const created = (await submit.json()) as ReplicatePrediction;
-  if (!created.id) throw new Error("Seedream submit returned no prediction id");
+  const result = (await res.json()) as FalImageResponse;
+  const outputUrl = result.images?.find((image) => image.url)?.url;
+  if (!outputUrl) throw new Error("Seedream completed without an image url");
 
-  // 2. Poll (~2s interval, 2 min cap — images return in seconds)
-  const statusUrl = `${REPLICATE_BASE}/predictions/${created.id}`;
-  const deadline = Date.now() + 2 * 60 * 1000;
-  let outputUrl: string | null = null;
-  while (Date.now() < deadline) {
-    const res = await fetch(statusUrl, { headers: { Authorization: replicateAuth() } });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      throw new Error(`Seedream poll failed (${res.status}): ${txt.slice(0, 200)}`);
-    }
-    const pred = (await res.json()) as ReplicatePrediction;
-    if (pred.status === "succeeded") {
-      outputUrl = Array.isArray(pred.output) ? pred.output[0] : pred.output ?? null;
-      break;
-    }
-    if (pred.status === "failed" || pred.status === "canceled") {
-      throw new Error(`Seedream ${pred.status}: ${pred.error ?? "no detail"}`);
-    }
-    await sleep(2_000);
-  }
-  if (!outputUrl) throw new Error("Seedream polling timed out");
-
-  // 3. Mirror to Cloudinary (provider URL expires) and return
   const { url } = await mirrorToCloudinary({
     sourceUrl: outputUrl,
-    publicId: `ad-factory/images/${created.id}`,
+    publicId: `ad-factory/images/fal-${result.seed ?? Date.now()}-${Math.random().toString(16).slice(2)}`,
     resourceType: "image",
   });
   return { url, provider: IMAGE_PROVIDER, costUsd: IMAGE_COST_USD };
+}
+
+function imageSizeForAspectRatio(aspectRatio: "9:16" | "16:9" | "1:1") {
+  if (aspectRatio === "16:9") return "landscape_16_9";
+  if (aspectRatio === "1:1") return "square_hd";
+  return "portrait_16_9";
 }
 
 // ===========================================================================
@@ -158,15 +139,8 @@ export async function generateImage(
 // at the climax, keep a pre-baked clip in your back pocket.
 // ===========================================================================
 
-const FAL_QUEUE_BASE = "https://queue.fal.run";
 const SEEDANCE_ENDPOINT = "bytedance/seedance-2.0/reference-to-video";
 export const VIDEO_PROVIDER = `fal/${SEEDANCE_ENDPOINT}`;
-
-function falAuth(): string {
-  const key = process.env.FAL_KEY;
-  if (!key) throw new Error("FAL_KEY is not set");
-  return `Key ${key}`;
-}
 
 export interface VideoJob {
   jobId: string;

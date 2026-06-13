@@ -5,9 +5,9 @@ queue / status-polling / Blob-mirror is the most dangerous code to rewrite under
 
 What lands here:
 
-- **Replicate wrapper (image)** — returns in seconds → safe to run live on stage
-- **Fal wrapper (video)** — async: fire job, poll status. NEVER awaited inline on stage
-- **Blob mirror** — provider URLs expire; mirror EVERY artifact to Vercel Blob
+- **Fal Seedream wrapper (image)** - returns in seconds → safe to run live on stage
+- **Fal Seedance wrapper (video)** - async: fire job, poll status. NEVER awaited inline on stage
+- **Cloudinary mirror** - provider URLs expire; mirror EVERY artifact to Cloudinary
 
 **Cut from the port (per CLAUDE.md), do not bring these over:**
 
@@ -19,4 +19,4 @@ Wire it behind `app/api/render/route.ts` — the mock in there documents the
 request/response contract C is already building against. **Keep the contract,
 swap the internals.** Log every render through `lib/metrics/clickhouse.ts`.
 
-Deps already installed: `replicate`, `@fal-ai/client`, `@vercel/blob`.
+Deps already installed: `@fal-ai/client`, `cloudinary`.

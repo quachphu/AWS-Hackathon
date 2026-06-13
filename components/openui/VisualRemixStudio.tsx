@@ -456,7 +456,8 @@ function LibraryView() {
 
   // localStorage is client-only — read after mount to avoid hydration mismatch.
   useEffect(() => {
-    setProjects(listProjects());
+    const id = window.setTimeout(() => setProjects(listProjects()), 0);
+    return () => window.clearTimeout(id);
   }, []);
 
   function removeProject(id: string) {
