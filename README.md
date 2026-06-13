@@ -86,6 +86,8 @@ Repo citation surface: [`cited.md`](cited.md) is the repo-level manifest, and [`
 
 Status: the external Senso knowledge system and `cited.md` publishing surface are live. The app runtime still uses imported source text and mock-safe context; the next engineering step is to wire the remix agent to retrieve from Senso directly before draft and prompt generation.
 
+Future agent retrieval shape: add a read-only `retrieve_brand_context` tool to the harnessed agent. The tool would accept the imported source URL, product/persona, target platform, and draft intent, then query Senso for brand voice, visual tokens, creator constraints, approved claims, competitor context, and source citations. The agent would pass that normalized context packet into the TrueFoundry/OpenAI prompt before drafting or rendering, store the citations on the ClickHouse event row, and include those facts in the Fastino/Pioneer training records. If Senso is unavailable, the fallback is the existing `cited.md` manifest plus the imported transcript so the demo still runs.
+
 **TrueFoundry - AI gateway and model routing**
 Why: Model calls should not be scattered direct provider calls. TrueFoundry gives the system one governed gateway for model routing, env-based swaps, fallback behavior, and provider separation. This is what lets the same remix agent use OpenAI locally and route through the gateway in production.
 
@@ -97,6 +99,8 @@ Why: A smaller specialized model is useful only if it preserves brand context an
 How it fits: Pioneer drafts structured ad concepts and is the target for the ClickHouse-to-Fastino training/export story. Good remix prompts, generated-image URLs, OpenUI artifacts, analytics summaries, and quality labels become JSONL records that can train or evaluate a specialized prompt model. Evidence: `lib/draft/generator.ts`, `lib/analytics/fine-tuning.ts`, `app/api/analytics/export/route.ts`, and `app/api/analytics/train/route.ts`.
 
 Status: drafting path and export pipeline are wired; actual Fastino/Pioneer training is intentionally mocked unless a real training job is connected.
+
+Future fine-tuning plan: keep ClickHouse as the append-only source of prompts, render URLs, analytics summaries, quality labels, and publish outcomes. Export JSONL through `/api/analytics/export`, split it into train/eval sets, score candidate records for visual specificity and brand consistency, then run a small Fastino/Pioneer prompt-model fine-tune. Promotion should be eval-gated: compare cost, latency, schema validity, prompt specificity, and downstream render quality against the base model before registering the tuned model behind the TrueFoundry gateway. The app should keep the current mock training job until that eval loop exists.
 
 **OpenUI - default UI, artifacts, analytics, and generated UI**
 Why: The app needs to show more than plain chat text. OpenUI lets the agent return structured, inspectable UI: prompt artifacts, analytics cards, training-pipeline status, and generated panels. This is especially important for judges because sponsor outputs become visible product surfaces, not hidden logs.
@@ -121,6 +125,8 @@ Why: Judges need a public URL, and background agent jobs should not rely on a br
 How it fits: Render hosts the Next.js app through `render.yaml`. The render API is designed around submit/poll semantics so long-running video work can survive normal request boundaries. The next step is moving background dev-loop jobs, training exports, and grading/report generation into Render Workflow-style durable runs. Evidence: `render.yaml`, `app/api/render/route.ts`, and `lib/render/render-core.ts`.
 
 Status: deployment is live; durable Render Workflow agent jobs are documented as the next production hardening step, not overclaimed as fully built.
+
+Future MCP-on-Render shape: expose the harnessed agent as a Render-hosted action service with MCP-compatible tools for import, Senso retrieval, remix, image render, video submit/poll, publish dry-run, analytics pull, ClickHouse aggregation, and training export. Render would hold the production env, Composio credentials, Fal/Cloudinary keys, and ClickHouse access, while long-running video and training jobs remain submit/poll or durable workflow tasks instead of blocking a browser tab.
 
 **OpenAI Agents SDK - agent orchestration**
 Why: The app needs an agent that can reason over a prompt, call tools, summarize analytics, and decide what UI artifact should be shown. The OpenAI Agents SDK gives us that orchestration layer while TrueFoundry remains the gateway story for governed model access.
@@ -162,6 +168,29 @@ User enters a topic or imported source link
 
 The repo is intentionally mock-first. The app can run with zero keys and progressively light up real services lane by lane. `/api/draft` serves a mock draft, `/api/render` serves placeholder stills and a stand-in clip, `/api/publish` can dry-run, and telemetry degrades safely when ClickHouse is not configured.
 
+### Future autonomous loop
+
+The current build has the main hooks, but the fully autonomous version should run as one governed loop:
+
+```txt
+Instagram Reel or source URL
+  -> /api/ingest with Apify caption/metadata scrape
+  -> Senso retrieve_brand_context for brand voice, claims, visual tokens, and citations
+  -> TrueFoundry/OpenAI Agents SDK analyzes the source and creates a remix plan
+  -> OpenUI shows editable prompt/storyboard artifacts
+  -> render_image creates the first still through Fal Seedream + Cloudinary
+  -> submit_video queues Seedance and poll_video returns the permanent video URL
+  -> prepare_publish_dry_run builds the caption and approval payload
+  -> optional approved /api/publish sends through Composio
+  -> Composio analytics returns profile/media performance
+  -> ClickHouse stores source, prompts, renders, publish events, costs, and outcomes
+  -> export_training_dataset builds Fastino/Pioneer JSONL
+  -> eval-gated fine-tune promotes a smaller brand-preserving prompt model
+  -> the agent recommends the next remix from the improved context
+```
+
+The production version should keep explicit approval before live publish, but every other step can be automated by the Render-hosted MCP/action agent once the retrieval and durable-job pieces are connected.
+
 ### Challenges we ran into
 
 **Keeping scope under control**
@@ -195,13 +224,13 @@ We also learned that async video needs choreography. Image generation can be the
 
 ### What's next for VisualLabs
 
-- Wire the remix agent to retrieve from the seeded Senso AI knowledge base before draft and prompt generation.
+- Add the Senso `retrieve_brand_context` tool and feed its cited context into draft, remix, and render prompts.
 - Promote the harnessed agent as a Render-hosted MCP/action service that can run source import, reference analysis, remix, generation, publish preparation, analytics, ClickHouse aggregation, and training export end to end.
 - Keep publishing high-quality citeables to `cited.md` so VisualLabs has public, source-grounded pages for GEO monitoring and AI citation.
 - Add TikTok analytics ingestion into ClickHouse.
 - Expand OpenUI artifacts into storyboard, analytics, and judge-readiness artifacts.
 - Add a real approval gate before Composio publish.
-- Promote the Fastino/Pioneer tuned model after evals show lower cost or better latency.
+- Promote the Fastino/Pioneer tuned model only after evals show lower cost, better latency, valid schema output, and stronger brand-preserving render prompts.
 - Store successful generations as training/eval examples for continuous model improvement.
 
 ### Built with
