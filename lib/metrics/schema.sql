@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS generations (
   ts          DateTime DEFAULT now(),
   phase       LowCardinality(String),  -- draft | image | video | publish
   model       LowCardinality(String),  -- base vs pioneer id — the chart splits on this
-  provider    LowCardinality(String),  -- truefoundry | replicate | fal | composio
+  provider    LowCardinality(String),  -- truefoundry | fal | composio
   draft_id    String,
   shot_id     String,
   latency_ms  UInt32,

@@ -408,7 +408,7 @@ export function VisualRemixStudio() {
           eventType: "artifact_render",
           role: "assistant",
           model: "bytedance/seedream-4.5",
-          provider: "replicate",
+          provider: "fal",
           prompt,
           response: imageUrl,
           artifactType: "ImageRender",

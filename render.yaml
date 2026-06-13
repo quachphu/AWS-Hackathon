@@ -30,8 +30,6 @@ services:
         sync: false
       - key: CLICKHOUSE_PASSWORD
         sync: false
-      - key: REPLICATE_API_TOKEN
-        sync: false
       - key: FAL_KEY
         sync: false
       - key: CLOUDINARY_URL          # mirror target (replaced Vercel Blob)

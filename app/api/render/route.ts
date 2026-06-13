@@ -22,12 +22,11 @@ import {
  * accepted but not required — draftId/model flow through to ClickHouse for a
  * richer money chart; startImageUrl seeds video off a shot's generated still.
  *
- * Image needs REPLICATE_API_TOKEN + CLOUDINARY_URL; video needs FAL_KEY +
- * CLOUDINARY_URL. Missing either → that path falls back to a mock.
+ * Image and video need FAL_KEY + CLOUDINARY_URL. Missing either → that path
+ * falls back to a mock.
  */
 
-const hasImageKeys = () =>
-  !!process.env.REPLICATE_API_TOKEN && !!process.env.CLOUDINARY_URL;
+const hasImageKeys = () => !!process.env.FAL_KEY && !!process.env.CLOUDINARY_URL;
 const hasVideoKeys = () => !!process.env.FAL_KEY && !!process.env.CLOUDINARY_URL;
 
 // Jobs are encoded into the returned jobId so polling survives Render restarts
@@ -92,7 +91,7 @@ export async function POST(req: Request) {
         const url = `https://picsum.photos/seed/${encodeURIComponent(shotId)}-${prompt.length}/768/432`;
         await logEvent({
           phase: "image",
-          provider: "mock-replicate",
+          provider: "mock-fal-image",
           model,
           draft_id: draftId,
           shot_id: shotId,
@@ -103,7 +102,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ url });
       }
 
-      // REAL — Replicate Seedream, live, mirrored to Cloudinary. Returns in seconds.
+      // REAL — Fal Seedream, live, mirrored to Cloudinary. Returns in seconds.
       const t0 = Date.now();
       const result = await generateImage(prompt, {
         referenceImageUrls: startImageUrl ? [startImageUrl] : undefined,

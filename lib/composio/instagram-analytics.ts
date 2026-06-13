@@ -1,4 +1,5 @@
 import { Composio } from "@composio/core";
+import { getComposioApiKey, getComposioToolExecutionCommon } from "@/lib/composio/config";
 
 export type InstagramProfile = {
   id: string;
@@ -34,30 +35,26 @@ export type InstagramAnalyticsSnapshot = {
   error?: string;
 };
 
-const DEFAULT_COMPOSIO_USER_ID = "ad-factory-demo-user";
 const DEFAULT_METRICS = "views,reach,likes,comments,shares,saved,total_interactions";
 
 type UnknownRecord = Record<string, unknown>;
 
 export async function fetchInstagramAnalytics(): Promise<InstagramAnalyticsSnapshot> {
   const apiKey = getComposioApiKey();
-  const userId = process.env.COMPOSIO_USER_ID ?? DEFAULT_COMPOSIO_USER_ID;
-  const igUserId = process.env.INSTAGRAM_IG_USER_ID;
+  const igUserId = process.env.INSTAGRAM_IG_USER_ID ?? "me";
+  const profileIgUserId = process.env.INSTAGRAM_PROFILE_IG_USER_ID ?? "me";
 
-  if (!apiKey || !igUserId) {
-    return mockInstagramAnalyticsSnapshot("Missing COMPOSIO_API_KEY/COMPOSIO_API or INSTAGRAM_IG_USER_ID.");
+  if (!apiKey) {
+    return mockInstagramAnalyticsSnapshot("Missing COMPOSIO_API_KEY/COMPOSIO_API.");
   }
 
   try {
     const composio = new Composio({ apiKey });
-    const common = {
-      userId,
-      dangerouslySkipVersionCheck: true,
-    };
+    const common = getComposioToolExecutionCommon("instagram");
 
     const profileData = asRecord(
       await executeComposioTool(composio, "INSTAGRAM_GET_USER_INFO", common, {
-        ig_user_id: igUserId,
+        ig_user_id: profileIgUserId,
       })
     );
 
@@ -134,14 +131,10 @@ export async function fetchInstagramAnalytics(): Promise<InstagramAnalyticsSnaps
   }
 }
 
-function getComposioApiKey() {
-  return process.env.COMPOSIO_API_KEY ?? process.env.COMPOSIO_API ?? "";
-}
-
 async function executeComposioTool(
   composio: Composio,
   slug: string,
-  common: { userId: string; dangerouslySkipVersionCheck: boolean },
+  common: { userId: string; connectedAccountId?: string; dangerouslySkipVersionCheck: boolean },
   args: UnknownRecord
 ) {
   const result = await composio.tools.execute(slug, {

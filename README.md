@@ -147,7 +147,7 @@ User enters a topic or imported source link
   -> schema-valid draft or refined render prompt
   -> OpenUI remix workspace renders the result
   -> /api/render kind="image"
-  -> Replicate Seedream or mock image path
+  -> Fal Seedream or mock image path
   -> /api/render kind="video"
   -> Fal async job or mock video path
   -> /api/publish
@@ -212,7 +212,6 @@ We also learned that async video needs choreography. Image generation can be the
 - React 19
 - Tailwind v4
 - OpenAI Agents SDK
-- Replicate
 - Fal
 - Cloudinary
 
@@ -231,7 +230,7 @@ We also learned that async video needs choreography. Image generation can be the
 
 Submitted to [Harness Engineering Hack](https://harness-hack.devpost.com/).
 
-Sponsor-powered ad production line: **topic/transcript → structured draft (Pioneer via TrueFoundry) → images (Replicate) → video (Fal) → published (Composio)** — instrumented for cost in **ClickHouse** the whole way.
+Sponsor-powered ad production line: **topic/transcript → structured draft (Pioneer via TrueFoundry) → images/video (Fal) → published (Composio)** — instrumented for cost in **ClickHouse** the whole way.
 
 **Required reading:** [CLAUDE.md](CLAUDE.md) (what we're building, cut order, demo choreography) · [CONTRIBUTION.md](CONTRIBUTION.md) (lanes, git flow, mock-first discipline).
 
