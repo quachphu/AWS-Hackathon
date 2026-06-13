@@ -66,25 +66,52 @@ The goal was not only to create a good-looking demo, but to show a production-sh
 ### Sponsor stack
 
 **Senso AI - context and trend intelligence**
-Senso represents the front of the workflow: the place where source context, customer signal, and trend understanding can enter the system. In the demo story, it helps identify what should be remixed or produced.
+Why: Visual output quality depends on memory: brand voice, creator style, product facts, approvals, and cited source context. Senso is the context layer we would use to hold that cited company/person/brand knowledge so the agent is not inventing context every time it writes an image or video prompt.
+
+How it fits: Senso sits before prompt generation as the retrieval/context source for "what should this brand sound and look like?" In repo terms, it maps to the cited-context inputs that feed import, remix chat, prompt refinement, and the future training examples. We intentionally keep this out of a transactional app database; it is knowledge/context, not product auth or customer state.
+
+Status: documented as the context lane. A full Senso connector or `cited.md` knowledge file is the next integration point; the current demo uses imported source text and mock-safe context.
 
 **TrueFoundry - AI gateway and model routing**
-TrueFoundry sits in front of model calls as the governed gateway layer. Pioneer is one of the models behind that gateway, so the gateway and the model complement each other instead of competing for the same role.
+Why: Model calls should not be scattered direct provider calls. TrueFoundry gives the system one governed gateway for model routing, env-based swaps, fallback behavior, and provider separation. This is what lets the same remix agent use OpenAI locally and route through the gateway in production.
+
+How it fits: The remix agent and ingest analysis use an OpenAI-compatible path that can point at TrueFoundry. Pioneer is one of the models behind the gateway, not a replacement for it. Evidence: `lib/gateway/client.ts`, `lib/gateway/models.ts`, `lib/openai/remix-agent.ts`, and `lib/ingest/instagram.ts`.
 
 **Fastino / Pioneer - specialized drafting model**
-Pioneer is the drafting-model path. It turns a topic or transcript into schema-valid ad structure: title, hook, CTA, pacing, shots, image prompts, video prompts, and metadata.
+Why: A smaller specialized model is useful only if it preserves brand context and outputs better prompts at lower cost or latency. For VisualLabs, the target is a small language model that learns which image/video prompt patterns work for a specific person, company, or creator brand.
+
+How it fits: Pioneer drafts structured ad concepts and is the target for the ClickHouse-to-Fastino training/export story. Good remix prompts, generated-image URLs, OpenUI artifacts, analytics summaries, and quality labels become JSONL records that can train or evaluate a specialized prompt model. Evidence: `lib/draft/generator.ts`, `lib/analytics/fine-tuning.ts`, `app/api/analytics/export/route.ts`, and `app/api/analytics/train/route.ts`.
+
+Status: drafting path and export pipeline are wired; actual Fastino/Pioneer training is intentionally mocked unless a real training job is connected.
 
 **OpenUI - default UI, artifacts, analytics, and generated UI**
-OpenUI is load-bearing in the frontend. It renders prompt artifacts, Instagram analytics artifacts, training-pipeline artifacts, and production-console panels from repo-owned OpenUI Lang programs and component libraries.
+Why: The app needs to show more than plain chat text. OpenUI lets the agent return structured, inspectable UI: prompt artifacts, analytics cards, training-pipeline status, and generated panels. This is especially important for judges because sponsor outputs become visible product surfaces, not hidden logs.
+
+How it fits: OpenUI renders the remix prompt artifact, the dynamically generated Instagram analytics UI, and the ClickHouse/Fastino training artifact. The analytics UI comes from a live/mocked Instagram response pulled through Composio MCP, summarized by the OpenAI Agents SDK, and routed through the TrueFoundry/OpenAI agent path. Evidence: `components/openui/VisualRemixStudio.tsx`, `components/openui/OpenUIAgentFullscreen.tsx`, `components/openui/visual-openui-library.tsx`, `lib/openui/programs.ts`, and `app/api/openui/generate/route.ts`.
 
 **ClickHouse - cost and event warehouse**
-ClickHouse receives generation, chat-history, render, export, and training-loop events. When ClickHouse is not configured, the app degrades to local/mock logging so the demo remains reliable.
+Why: We need an append-only record of what happened: prompt in, model out, render cost, latency, publish handoff, analytics result, and quality label. That record powers cost-per-draft, auditability, and the training dataset for the future small prompt model.
+
+How it fits: ClickHouse is deliberately not a transactional app database. It is the event warehouse for prompt history, render telemetry, cost comparisons, and Fastino/Pioneer JSONL export. This is what lets VisualLabs preserve personal/company brand context over time without adding product auth or a primary app DB. Evidence: `lib/metrics/clickhouse.ts`, `lib/metrics/schema.sql`, `lib/analytics/chat-history.ts`, `lib/analytics/fine-tuning.ts`, and `app/api/analytics/history/route.ts`.
+
+Status: ClickHouse writes are non-blocking. If keys are missing, the app uses memory/console fallback so the demo still works.
 
 **Composio - publish and analytics action layer**
-Composio closes the loop with Instagram publish and analytics tools. Real social actions require explicit user intent; the demo path can dry-run publish so it stays safe on stage.
+Why: The production line should end in a real action, not a downloaded asset. Composio gives the agent a governed way to call external tools for social publishing and analytics while keeping user approval explicit.
+
+How it fits: The Instagram analytics route calls Composio tools, the OpenAI agent summarizes the response, and OpenUI renders the analytics artifact back in chat. The publish route can create a dry-run post for demo safety or call Composio when credentials/accounts are configured. Evidence: `lib/composio/instagram-analytics.ts`, `lib/composio/publish.ts`, `lib/openai/instagram-analytics-agent.ts`, `app/api/agent/instagram-analytics/route.ts`, and `app/api/publish/route.ts`.
 
 **Render - deployment**
-Render hosts the live app and gives judges a public URL instead of a localhost-only walkthrough.
+Why: Judges need a public URL, and background agent jobs should not rely on a browser tab staying open. Render gives us the deployment surface today and is the natural place to run durable workflow jobs for longer agent tasks.
+
+How it fits: Render hosts the Next.js app through `render.yaml`. The render API is designed around submit/poll semantics so long-running video work can survive normal request boundaries. The next step is moving background dev-loop jobs, training exports, and grading/report generation into Render Workflow-style durable runs. Evidence: `render.yaml`, `app/api/render/route.ts`, and `lib/render/render-core.ts`.
+
+Status: deployment is live; durable Render Workflow agent jobs are documented as the next production hardening step, not overclaimed as fully built.
+
+**OpenAI Agents SDK - agent orchestration**
+Why: The app needs an agent that can reason over a prompt, call tools, summarize analytics, and decide what UI artifact should be shown. The OpenAI Agents SDK gives us that orchestration layer while TrueFoundry remains the gateway story for governed model access.
+
+How it fits: The Instagram analytics agent uses a tool to fetch Composio Instagram data, then returns a summary and OpenUI artifact program. The remix agent refines image/video prompts and keeps rendering/publishing as explicit separate actions. Evidence: `lib/openai/instagram-analytics-agent.ts`, `lib/openai/training-pipeline-agent.ts`, `lib/openai/remix-agent.ts`, and `app/api/agent/*`.
 
 ### How we built it
 
