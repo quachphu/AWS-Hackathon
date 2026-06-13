@@ -59,6 +59,7 @@ Senso/context signal
   -> OpenUI remix workspace and artifacts
   -> image + video render pipeline
   -> ClickHouse cost and event warehouse
+  -> Langfuse agent traces, prompt versions, and evals (planned)
   -> Composio analytics/publishing handoff
   -> Render deployment
 ```
@@ -113,6 +114,24 @@ Why: We need an append-only record of what happened: prompt in, model out, rende
 How it fits: ClickHouse is deliberately not a transactional app database. It is the event warehouse for prompt history, render telemetry, cost comparisons, and Fastino/Pioneer JSONL export. This is what lets VisualLabs preserve personal/company brand context over time without adding product auth or a primary app DB. Evidence: `lib/metrics/clickhouse.ts`, `lib/metrics/schema.sql`, `lib/analytics/chat-history.ts`, `lib/analytics/fine-tuning.ts`, and `app/api/analytics/history/route.ts`.
 
 Status: ClickHouse writes are non-blocking. If keys are missing, the app uses memory/console fallback so the demo still works.
+
+**Langfuse - LLM and agent observability (planned)**
+Why: ClickHouse answers "what happened in the production line?" at the event, cost, and training-data level. Langfuse would answer the complementary LLM question: "why did the agent make that decision, which prompt version produced it, which tools were called, and did the output pass evals?" It is the right layer for trace trees, nested tool observations, prompt management, datasets, experiments, and online/offline evaluations. Reference: [Langfuse docs](https://langfuse.com/docs), [Langfuse glossary](https://langfuse.com/docs/glossary), and the [OpenAI Agents evaluation cookbook](https://developers.openai.com/cookbook/examples/agents_sdk/evaluate_agents).
+
+How it would fit: every `/api/agent/chat` run would create one Langfuse trace with nested observations for Senso retrieval, TrueFoundry/OpenAI generations, `render_image`, `submit_video`, `poll_video`, `prepare_publish_dry_run`, Composio analytics, and `export_training_dataset`. The trace id would be stored on the corresponding ClickHouse event rows, while ClickHouse event ids would be attached to Langfuse metadata. That gives two synchronized views: Langfuse for debugging prompts and agent steps, ClickHouse for warehouse queries, cost dashboards, and training export.
+
+Implementation plan:
+
+1. Add `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`, and `LANGFUSE_ENABLED` to `.env.example` and Render env docs.
+2. Add `lib/observability/langfuse.ts` with a lazy client and no-op fallback so local zero-key mode still works.
+3. Wrap `runRemixAgent`, `runInstagramAnalyticsAgent`, and `runTrainingPipelineAgent` with trace creation, user/session metadata, prompt names, model ids, provider, and route name.
+4. Instrument each harnessed tool as a nested observation/span with sanitized input/output, tool status, latency, provider, cost estimate, and related ClickHouse event id.
+5. Add prompt names and versions for remix refinement, import analysis, Instagram analytics summary, and training export narration so prompt changes can be compared over time.
+6. Create Langfuse datasets from high-quality ClickHouse examples and run experiments before promoting new prompt versions or Fastino/Pioneer model snapshots.
+7. Add eval scores for schema validity, brand consistency, visual specificity, source faithfulness, safety, and publish-readiness; write aggregate eval summaries back to ClickHouse for analytics.
+8. Add a small `/api/observability/trace-link` helper or metadata field so an internal reviewer can jump from an OpenUI artifact or ClickHouse row to the matching Langfuse trace.
+
+Future roadmap: after the hackathon, Langfuse should become the agent QA console. The team would use it to compare prompt versions, inspect failed tool plans, label high-quality generations, run regression datasets before deploys, and decide whether the Fastino/Pioneer tuned model is actually better than the base model. ClickHouse remains the system-of-record warehouse; Langfuse becomes the LLM observability and evaluation cockpit.
 
 **Composio - publish and analytics action layer**
 Why: The production line should end in a real action, not a downloaded asset. Composio gives the agent a governed way to call external tools for social publishing and analytics while keeping user approval explicit.
@@ -184,6 +203,7 @@ Instagram Reel or source URL
   -> optional approved /api/publish sends through Composio
   -> Composio analytics returns profile/media performance
   -> ClickHouse stores source, prompts, renders, publish events, costs, and outcomes
+  -> Langfuse stores trace trees, prompt versions, tool calls, and eval scores
   -> export_training_dataset builds Fastino/Pioneer JSONL
   -> eval-gated fine-tune promotes a smaller brand-preserving prompt model
   -> the agent recommends the next remix from the improved context
@@ -226,6 +246,7 @@ We also learned that async video needs choreography. Image generation can be the
 
 - Add the Senso `retrieve_brand_context` tool and feed its cited context into draft, remix, and render prompts.
 - Promote the harnessed agent as a Render-hosted MCP/action service that can run source import, reference analysis, remix, generation, publish preparation, analytics, ClickHouse aggregation, and training export end to end.
+- Add Langfuse as the planned LLM observability layer for agent traces, prompt versions, tool-call debugging, datasets, experiments, and eval scores, linked bidirectionally with ClickHouse event ids.
 - Keep publishing high-quality citeables to `cited.md` so VisualLabs has public, source-grounded pages for GEO monitoring and AI citation.
 - Add TikTok analytics ingestion into ClickHouse.
 - Expand OpenUI artifacts into storyboard, analytics, and judge-readiness artifacts.
@@ -240,6 +261,7 @@ We also learned that async video needs choreography. Image generation can be the
 - Fastino / Pioneer - specialized drafting model
 - OpenUI - remix UI, artifacts, analytics, and generated panels
 - ClickHouse - generation/event/cost telemetry
+- Langfuse - planned LLM traces, prompt management, and evaluation
 - Composio - Instagram analytics and social publishing action layer
 - Render - deployment
 - Next.js 16
