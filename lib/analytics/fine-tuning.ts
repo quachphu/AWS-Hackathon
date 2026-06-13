@@ -156,6 +156,12 @@ function scoreEvent(event: ChatHistoryEvent) {
   if (event.live) score += 10;
   if (event.artifactType) score += 10;
   if (event.response.length > 120) score += 10;
-  if (event.qualityLabel === "image_prompt" || event.qualityLabel === "analytics") score += 5;
+  if (
+    event.qualityLabel === "image_prompt" ||
+    event.qualityLabel === "good_image_prompt" ||
+    event.qualityLabel === "analytics"
+  ) {
+    score += 5;
+  }
   return Math.min(99, score);
 }
