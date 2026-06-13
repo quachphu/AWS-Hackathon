@@ -1,4 +1,4 @@
-# Ad Factory
+# VisualLabs
 
 ## Demo walkthrough
 
@@ -7,6 +7,46 @@
 Flow: home page -> Studio / Remix -> prompt refinement -> image render -> dry-run publish -> live analytics -> ClickHouse/Fastino training export.
 
 Generated with [HomenShum/feature-walkthrough-gif](https://github.com/HomenShum/feature-walkthrough-gif).
+
+## Devpost walkthrough
+
+**VisualLabs** is a governed ad production line: drop a topic, and the pipeline writes the ad, generates the images and video live, shows the cost per draft, and publishes it to Instagram from one fully instrumented workflow.
+
+**Try it out:** [aws-hackathon-ulrh.onrender.com](https://aws-hackathon-ulrh.onrender.com/)
+
+### Inspiration
+
+Making a video ad still means juggling five disconnected tools and never knowing what it actually cost until the invoice lands.
+
+### What it does
+
+Drop in a topic or transcript and VisualLabs drafts a structured ad, generates the images and video live, tracks cost per draft, and ships it to Slack for approval, all in one pipeline.
+
+### How we built it
+
+A fine-tuned Pioneer model drafts the ad behind a TrueFoundry gateway, Replicate and Fal handle image and video gen, ClickHouse logs every cost, OpenUI renders the storyboard, and Composio closes the loop.
+
+### Challenges we ran into
+
+Keeping live image gen fast while async video rendering ran in the background, and making the whole pipeline read as load-bearing, not a cool video toy with sponsors bolted on.
+
+### Accomplishments that we're proud of
+
+One governed production line that's fully instrumented end to end, with a tuned model that's measurably cheaper and better than the base.
+
+### What we learned
+
+The real win isn't any single model. It's wiring drafting, rendering, costing, and publishing into one observable pipeline you can actually measure.
+
+### What's next for VisualLabs
+
+More ad formats, longer multi-clip videos, and closing the loop so the model keeps fine-tuning on our own traffic automatically.
+
+### Built with
+
+ClickHouse, Composio, OpenUI, Pioneer, Render, Senso, TrueFoundry.
+
+Submitted to [Harness Engineering Hack](https://harness-hack.devpost.com/).
 
 Sponsor-powered ad production line: **topic/transcript → structured draft (Pioneer via TrueFoundry) → images (Replicate) → video (Fal) → published (Composio)** — instrumented for cost in **ClickHouse** the whole way.
 
