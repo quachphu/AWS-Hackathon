@@ -27,6 +27,8 @@ export type RuntimeModelConfig = {
   };
 };
 
+export type DraftModelConfig = RuntimeModelConfig["draft"];
+
 export function getRuntimeModelConfig(): RuntimeModelConfig {
   const draftModels: DraftModelOption[] = [];
 
@@ -58,6 +60,10 @@ export function getRuntimeModelConfig(): RuntimeModelConfig {
       gatewayConfigured: isGatewayConfigured,
     },
   };
+}
+
+export function getDraftModelConfig(): DraftModelConfig {
+  return getRuntimeModelConfig().draft;
 }
 
 function addDraftModel(models: DraftModelOption[], option: DraftModelOption) {

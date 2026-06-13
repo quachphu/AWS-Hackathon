@@ -15,7 +15,8 @@ export type PublishResult = {
   instagram?: { media_id?: string };
 };
 
-const USER_ID = "ad-factory-demo-user";
+const USER_ID = process.env.COMPOSIO_USER_ID ?? "ad-factory-demo-user";
+const INSTAGRAM_IG_USER_ID = process.env.INSTAGRAM_IG_USER_ID ?? "me";
 
 // Accept either env name: COMPOSIO_API_KEY (canonical) or COMPOSIO_API (alias).
 function getComposioApiKey() {
@@ -69,8 +70,14 @@ async function publishToInstagram(input: PublishInput): Promise<PublishResult["i
     userId: USER_ID,
     dangerouslySkipVersionCheck: true,
     arguments: isVideo
-      ? { media_type: "REELS", video_url: mediaUrl, caption, share_to_feed: true }
-      : { image_url: mediaUrl, caption },
+      ? {
+          ig_user_id: INSTAGRAM_IG_USER_ID,
+          media_type: "REELS",
+          video_url: mediaUrl,
+          caption,
+          share_to_feed: true,
+        }
+      : { ig_user_id: INSTAGRAM_IG_USER_ID, image_url: mediaUrl, caption },
   });
 
   if (containerResult.error) throw new Error(`Instagram container: ${containerResult.error}`);
@@ -86,7 +93,7 @@ async function publishToInstagram(input: PublishInput): Promise<PublishResult["i
   const publishResult = await composio.tools.execute("INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH", {
     userId: USER_ID,
     dangerouslySkipVersionCheck: true,
-    arguments: { creation_id },
+    arguments: { ig_user_id: INSTAGRAM_IG_USER_ID, creation_id },
   });
 
   if (publishResult.error) throw new Error(`Instagram publish: ${publishResult.error}`);
