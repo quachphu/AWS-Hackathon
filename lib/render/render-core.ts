@@ -159,7 +159,7 @@ export async function submitVideo(
     startImageUrl?: string; // first-frame seed (e.g. the shot's generated still)
   } = {}
 ): Promise<VideoJob> {
-  const durationSeconds = opts.durationSeconds ?? 5;
+  const durationSeconds = normalizeVideoDuration(opts.durationSeconds);
   const body: Record<string, unknown> = {
     prompt: opts.startImageUrl
       ? `Open the shot from @Image1 and use it as the visual reference for subject, style, and composition.\n\n${prompt}`
@@ -195,6 +195,12 @@ export async function submitVideo(
     provider: VIDEO_PROVIDER,
     durationSeconds,
   };
+}
+
+function normalizeVideoDuration(durationSeconds: number | undefined) {
+  const value = durationSeconds ?? 5;
+  if (!Number.isFinite(value)) return 5;
+  return Math.min(15, Math.max(4, Math.round(value)));
 }
 
 export type VideoPollResult =
