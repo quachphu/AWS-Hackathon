@@ -1,5 +1,13 @@
 # Ad Factory
 
+## Demo walkthrough
+
+![VisualLabs full walkthrough](docs/assets/visual-labs-full-flow.gif)
+
+Flow: home page -> Studio / Remix -> prompt refinement -> image render -> dry-run publish -> live analytics -> ClickHouse/Fastino training export.
+
+Generated with [HomenShum/feature-walkthrough-gif](https://github.com/HomenShum/feature-walkthrough-gif).
+
 Sponsor-powered ad production line: **topic/transcript → structured draft (Pioneer via TrueFoundry) → images (Replicate) → video (Fal) → published (Composio)** — instrumented for cost in **ClickHouse** the whole way.
 
 **Required reading:** [CLAUDE.md](CLAUDE.md) (what we're building, cut order, demo choreography) · [CONTRIBUTION.md](CONTRIBUTION.md) (lanes, git flow, mock-first discipline).
