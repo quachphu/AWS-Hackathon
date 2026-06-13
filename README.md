@@ -4,9 +4,9 @@
 
 ![VisualLabs full walkthrough](docs/assets/visual-labs-full-flow.gif)
 
-Current GIF coverage: home page -> Studio / Remix -> prompt refinement -> image render -> dry-run publish -> live analytics -> ClickHouse/Fastino training export.
+Current GIF coverage: home page -> Import -> source link prep -> Remix workspace -> Analytics -> ClickHouse/Fastino training export.
 
-Updated full flow to capture next: home page -> Import -> `/api/ingest` Apify transcript/reference analysis -> `/remix/{id}` -> agent prompt refinement -> `render_image` / `submit_video` / `poll_video` tools -> `prepare_publish_dry_run` -> live analytics -> `export_training_dataset` -> ClickHouse/Fastino training records.
+Full runtime flow: home page -> Import -> `/api/ingest` Apify transcript/reference analysis -> `/remix/{id}` -> agent prompt refinement -> `render_image` / `submit_video` / `poll_video` tools -> `prepare_publish_dry_run` -> live analytics -> `export_training_dataset` -> ClickHouse/Fastino training records.
 
 Generated with [HomenShum/feature-walkthrough-gif](https://github.com/HomenShum/feature-walkthrough-gif).
 
