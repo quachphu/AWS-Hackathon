@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
-import { getDraftModelConfig } from "@/lib/gateway/models";
+import { getRuntimeModelConfig } from "@/lib/gateway/models";
+
+export const dynamic = "force-dynamic";
 
 export function GET() {
-  return NextResponse.json(getDraftModelConfig());
+  return Response.json(getRuntimeModelConfig());
 }

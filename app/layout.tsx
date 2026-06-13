@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import "@openuidev/react-ui/components.css";
+import "@openuidev/react-ui/styles/index.css";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ad Factory",
+  title: "VisualLabs Trend Remix Engine",
   description:
-    "Sponsor-powered ad production line: topic → structured draft → images → video → published, instrumented for cost the whole way.",
+    "Autonomous short-form trend remix engine for prompt generation, OpenUI artifacts, analytics, and publish handoff.",
 };
 
 export default function RootLayout({

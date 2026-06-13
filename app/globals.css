@@ -1,9 +1,10 @@
+@layer theme, base, openui, components, utilities;
+
 @import "tailwindcss";
 
-/* Demo runs dark regardless of OS theme — one look on stage. */
 :root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  --background: #f7f6f4;
+  --foreground: #211c18;
 }
 
 @theme inline {
@@ -17,4 +18,48 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+.visual-artifact-panel {
+  border-radius: 8px !important;
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgb(35 28 22 / 18%);
+}
+
+.landing-carousel {
+  overflow: hidden;
+  padding: 4px 0 26px;
+  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+}
+
+.landing-carousel-track {
+  display: flex;
+  width: max-content;
+  gap: 16px;
+  animation: visual-trend-spin 36s linear infinite;
+}
+
+.landing-carousel[data-paused="true"] .landing-carousel-track {
+  animation-play-state: paused;
+}
+
+.landing-trend-card {
+  flex: 0 0 auto;
+  width: calc((min(100vw - 40px, 640px) - 16px) / 2);
+}
+
+@media (min-width: 768px) {
+  .landing-trend-card {
+    width: calc((min(100vw - 64px, 1180px) - 64px) / 5);
+  }
+}
+
+@keyframes visual-trend-spin {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(calc(-50% - 8px));
+  }
 }
