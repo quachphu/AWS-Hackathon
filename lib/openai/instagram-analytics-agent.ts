@@ -88,7 +88,7 @@ export async function runInstagramAnalyticsAgent(): Promise<InstagramAnalyticsAg
 
   return {
     live: snapshot.live,
-    mocked,
+    mocked: mocked || !snapshot.live || snapshot.source === "mock",
     model,
     summary,
     recommendations,

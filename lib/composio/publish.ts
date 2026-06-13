@@ -1,4 +1,5 @@
 import { Composio } from "@composio/core";
+import { getComposioApiKey, getComposioToolExecutionCommon } from "@/lib/composio/config";
 
 export type PublishInput = {
   title: string;
@@ -15,79 +16,78 @@ export type PublishResult = {
   instagram?: { media_id?: string };
 };
 
-const USER_ID = "ad-factory-demo-user";
+type UnknownRecord = Record<string, unknown>;
 
-function getComposioApiKey() {
-  return process.env.COMPOSIO_API_KEY ?? process.env.COMPOSIO_API;
-}
-
-function getSession() {
-  return new Composio({ apiKey: getComposioApiKey() }).create(USER_ID);
+function getComposio() {
+  return new Composio({ apiKey: getComposioApiKey() });
 }
 
 async function publishToTikTok(input: PublishInput): Promise<PublishResult["tiktok"]> {
-  if (!input.videoUrl) return undefined;
-
-  const session = await getSession();
   const caption = `${input.hook}\n\n${input.cta}`.slice(0, 2200);
 
-  const result = await session.execute("TIKTOK_PUBLISH_VIDEO", {
-    video_url: input.videoUrl,
-    caption,
-    privacy_level: "SELF_ONLY",
-    disable_duet: false,
-    disable_stitch: false,
-    disable_comment: false,
+  const result = await getComposio().tools.execute("TIKTOK_PUBLISH_VIDEO", {
+    ...getComposioToolExecutionCommon("tiktok"),
+    arguments: {
+      video_url: input.videoUrl,
+      caption,
+      privacy_level: "SELF_ONLY",
+      disable_duet: false,
+      disable_stitch: false,
+      disable_comment: false,
+    },
   });
 
   if (result.error) throw new Error(`TikTok: ${result.error}`);
 
-  const data = typeof result.data === "string" ? JSON.parse(result.data as string) : result.data;
-  return { publish_id: data?.data?.publish_id };
+  const data = parseComposioData(result.data);
+  return { publish_id: stringField(recordField(data, "data"), "publish_id") };
 }
 
 async function publishToInstagram(input: PublishInput): Promise<PublishResult["instagram"]> {
   const mediaUrl = input.videoUrl ?? input.imageUrl;
-  if (!mediaUrl) return undefined;
 
-  const session = await getSession();
   const caption = `${input.hook}\n\n${input.cta}`.slice(0, 2200);
   const isVideo = !!input.videoUrl;
 
-  const containerResult = await session.execute(
-    "INSTAGRAM_POST_IG_USER_MEDIA",
-    isVideo
-      ? { media_type: "REELS", video_url: mediaUrl, caption, share_to_feed: true }
-      : { image_url: mediaUrl, caption }
-  );
+  const containerResult = await getComposio().tools.execute("INSTAGRAM_POST_IG_USER_MEDIA", {
+    ...getComposioToolExecutionCommon("instagram"),
+    arguments: isVideo
+      ? { ig_user_id: getInstagramPublishUserId(), media_type: "REELS", video_url: mediaUrl, caption, share_to_feed: true }
+      : { ig_user_id: getInstagramPublishUserId(), image_url: mediaUrl, caption },
+  });
 
   if (containerResult.error) throw new Error(`Instagram container: ${containerResult.error}`);
 
-  const containerData =
-    typeof containerResult.data === "string"
-      ? JSON.parse(containerResult.data as string)
-      : containerResult.data;
-  const creation_id: string = containerData?.id ?? containerData?.data?.id;
+  const containerData = parseComposioData(containerResult.data);
+  const creation_id = stringField(containerData, "id") ?? stringField(recordField(containerData, "data"), "id");
 
   if (!creation_id) throw new Error("Instagram: no creation_id returned");
 
-  const publishResult = await session.execute("INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH", {
-    creation_id,
+  const publishResult = await getComposio().tools.execute("INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH", {
+    ...getComposioToolExecutionCommon("instagram"),
+    arguments: {
+      creation_id,
+    },
   });
 
   if (publishResult.error) throw new Error(`Instagram publish: ${publishResult.error}`);
 
-  const publishData =
-    typeof publishResult.data === "string"
-      ? JSON.parse(publishResult.data as string)
-      : publishResult.data;
-  return { media_id: publishData?.id ?? publishData?.data?.id };
+  const publishData = parseComposioData(publishResult.data);
+  return { media_id: stringField(publishData, "id") ?? stringField(recordField(publishData, "data"), "id") };
 }
 
 export async function publishAd(
   input: PublishInput,
   targets: ("tiktok" | "instagram")[] = ["instagram"]
 ): Promise<PublishResult> {
+  const validationErrors = validatePublishInput(input, targets);
+  if (validationErrors.length > 0) {
+    return {
+      ok: false,
+      detail: validationErrors.join(" | "),
+    };
+  }
+
   if (!getComposioApiKey()) {
     return {
       ok: true,
@@ -126,4 +126,37 @@ export async function publishAd(
     tiktok,
     instagram,
   };
+}
+
+function validatePublishInput(input: PublishInput, targets: ("tiktok" | "instagram")[]) {
+  const errors: string[] = [];
+
+  if (targets.includes("tiktok") && !input.videoUrl) {
+    errors.push("TikTok publish requires a videoUrl.");
+  }
+
+  if (targets.includes("instagram") && !input.videoUrl && !input.imageUrl) {
+    errors.push("Instagram publish requires an imageUrl or videoUrl.");
+  }
+
+  return errors;
+}
+
+function parseComposioData(data: unknown): UnknownRecord {
+  const parsed = typeof data === "string" ? JSON.parse(data) : data;
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as UnknownRecord) : {};
+}
+
+function recordField(record: UnknownRecord, key: string): UnknownRecord {
+  const value = record[key];
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as UnknownRecord) : {};
+}
+
+function stringField(record: UnknownRecord, key: string) {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function getInstagramPublishUserId() {
+  return process.env.INSTAGRAM_PUBLISH_IG_USER_ID ?? process.env.INSTAGRAM_IG_USER_ID ?? "me";
 }
