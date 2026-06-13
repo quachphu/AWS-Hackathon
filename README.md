@@ -80,6 +80,8 @@ Live citeables:
 - [How does Harness Remix Studio compare with Canva AI Video Generator?](https://cited.md/article/how-does-harness-remix-studio-compare-with-canva-ai-video-generator)
 - [What tools help keep a character consistent across AI-generated social assets?](https://cited.md/article/what-tools-help-keep-a-character-consistent-across-ai-generated)
 
+Repo citation surface: [`cited.md`](cited.md) is the repo-level manifest, and [`app/cited.md/route.ts`](app/cited.md/route.ts) serves the same citation policy from the deployed app at `/cited.md`. The route source lives in [`lib/senso/cited-manifest.ts`](lib/senso/cited-manifest.ts).
+
 Status: the external Senso knowledge system and `cited.md` publishing surface are live. The app runtime still uses imported source text and mock-safe context; the next engineering step is to wire the remix agent to retrieve from Senso directly before draft and prompt generation.
 
 **TrueFoundry - AI gateway and model routing**

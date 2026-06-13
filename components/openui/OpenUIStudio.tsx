@@ -1,32 +1,53 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Renderer, type OpenUIError } from "@openuidev/react-lang";
-import { adFactoryOpenUiLibrary } from "@/components/openui/ad-factory-library";
 import {
-  ANALYTICS_OPENUI_PROGRAM,
-  DEFAULT_OPENUI_PROGRAM,
-  DEV_LOOP_OPENUI_PROGRAM,
-} from "@/lib/openui/programs";
+  DraftModelConfigContext,
+  adFactoryOpenUiLibrary,
+} from "@/components/openui/ad-factory-library";
+import type { DraftModelConfig } from "@/lib/gateway/models";
+import type { OpenUIPrograms, ProgramMode } from "@/lib/openui/programs";
 
-type ProgramMode = "default" | "analytics" | "dev";
-
-const cannedPrograms: Record<ProgramMode, string> = {
-  default: DEFAULT_OPENUI_PROGRAM,
-  analytics: ANALYTICS_OPENUI_PROGRAM,
-  dev: DEV_LOOP_OPENUI_PROGRAM,
+type OpenUIStudioProps = {
+  initialModelConfig: DraftModelConfig;
+  initialPrograms: OpenUIPrograms;
 };
 
-export function OpenUIStudio() {
+export function OpenUIStudio({ initialModelConfig, initialPrograms }: OpenUIStudioProps) {
   const [mode, setMode] = useState<ProgramMode>("default");
-  const [prompt, setPrompt] = useState("Show Pioneer cost versus base model and TikTok fit.");
-  const [program, setProgram] = useState(DEFAULT_OPENUI_PROGRAM);
+  const [prompt, setPrompt] = useState(
+    () =>
+      `Show ${modelIdForRole(initialModelConfig, "pioneer")} cost versus ${modelIdForRole(
+        initialModelConfig,
+        "base"
+      )} and TikTok fit.`
+  );
+  const [program, setProgram] = useState(initialPrograms.default);
+  const [modelConfig, setModelConfig] = useState(initialModelConfig);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<OpenUIError[]>([]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshModels() {
+      const res = await fetch("/api/models");
+      if (!res.ok) return;
+      const nextModelConfig = (await res.json()) as DraftModelConfig;
+      if (!cancelled) setModelConfig(nextModelConfig);
+    }
+
+    void refreshModels();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function chooseProgram(nextMode: ProgramMode) {
     setMode(nextMode);
-    setProgram(cannedPrograms[nextMode]);
+    setProgram(initialPrograms[nextMode]);
     setErrors([]);
   }
 
@@ -42,9 +63,14 @@ export function OpenUIStudio() {
         body: JSON.stringify({ prompt }),
       });
       if (!res.ok) throw new Error(`OpenUI generation failed (${res.status})`);
-      const body = (await res.json()) as { response: string; mode: ProgramMode };
+      const body = (await res.json()) as {
+        response: string;
+        mode: ProgramMode;
+        modelConfig?: DraftModelConfig;
+      };
       setMode(body.mode);
       setProgram(body.response);
+      if (body.modelConfig) setModelConfig(body.modelConfig);
     } catch (error) {
       setErrors([
         {
@@ -66,6 +92,9 @@ export function OpenUIStudio() {
           <div className="mr-auto">
             <p className="text-xs uppercase tracking-[0.2em] text-[#d9a074]">OpenUI control surface</p>
             <h1 className="text-sm font-semibold">Stored default UI + generated analytics</h1>
+            <p className="mt-0.5 max-w-xl truncate text-xs text-white/50">
+              Draft model: {modelConfig.defaultModelId}
+            </p>
           </div>
           <div className="flex rounded-lg border border-white/10 bg-white/5 p-1">
             <ModeButton active={mode === "default"} onClick={() => chooseProgram("default")}>
@@ -102,14 +131,20 @@ export function OpenUIStudio() {
         ) : null}
       </div>
 
-      <Renderer
-        library={adFactoryOpenUiLibrary}
-        response={program}
-        isStreaming={loading}
-        onError={setErrors}
-      />
+      <DraftModelConfigContext.Provider value={modelConfig}>
+        <Renderer
+          library={adFactoryOpenUiLibrary}
+          response={program}
+          isStreaming={loading}
+          onError={setErrors}
+        />
+      </DraftModelConfigContext.Provider>
     </main>
   );
+}
+
+function modelIdForRole(modelConfig: DraftModelConfig, role: "base" | "pioneer") {
+  return modelConfig.models.find((model) => model.roles.includes(role))?.id ?? modelConfig.defaultModelId;
 }
 
 function ModeButton({

@@ -23,6 +23,8 @@ function getComposio() {
 }
 
 async function publishToTikTok(input: PublishInput): Promise<PublishResult["tiktok"]> {
+  if (!input.videoUrl) return undefined;
+
   const caption = `${input.hook}\n\n${input.cta}`.slice(0, 2200);
 
   const result = await getComposio().tools.execute("TIKTOK_PUBLISH_VIDEO", {
@@ -45,15 +47,23 @@ async function publishToTikTok(input: PublishInput): Promise<PublishResult["tikt
 
 async function publishToInstagram(input: PublishInput): Promise<PublishResult["instagram"]> {
   const mediaUrl = input.videoUrl ?? input.imageUrl;
+  if (!mediaUrl) return undefined;
 
   const caption = `${input.hook}\n\n${input.cta}`.slice(0, 2200);
   const isVideo = !!input.videoUrl;
+  const igUserId = getInstagramPublishUserId();
 
   const containerResult = await getComposio().tools.execute("INSTAGRAM_POST_IG_USER_MEDIA", {
     ...getComposioToolExecutionCommon("instagram"),
     arguments: isVideo
-      ? { ig_user_id: getInstagramPublishUserId(), media_type: "REELS", video_url: mediaUrl, caption, share_to_feed: true }
-      : { ig_user_id: getInstagramPublishUserId(), image_url: mediaUrl, caption },
+      ? {
+          ig_user_id: igUserId,
+          media_type: "REELS",
+          video_url: mediaUrl,
+          caption,
+          share_to_feed: true,
+        }
+      : { ig_user_id: igUserId, image_url: mediaUrl, caption },
   });
 
   if (containerResult.error) throw new Error(`Instagram container: ${containerResult.error}`);
@@ -66,6 +76,7 @@ async function publishToInstagram(input: PublishInput): Promise<PublishResult["i
   const publishResult = await getComposio().tools.execute("INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH", {
     ...getComposioToolExecutionCommon("instagram"),
     arguments: {
+      ig_user_id: igUserId,
       creation_id,
     },
   });
