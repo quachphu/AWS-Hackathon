@@ -1,9 +1,29 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createLibrary, defineComponent } from "@openuidev/react-lang";
 import { z } from "zod";
 import type { Draft } from "@/lib/schema";
+import type { DraftModelConfig, DraftModelOption } from "@/lib/gateway/models";
+
+export const DraftModelConfigContext = createContext<DraftModelConfig | null>(null);
+
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  body: string;
+  modelId: string;
+};
+
+type DraftTrace = {
+  id: string;
+  source: string;
+  requestedModel: string;
+  responseModel?: string;
+  status: "pending" | "done" | "error";
+  latencyMs?: number;
+  detail?: string;
+};
 
 const navItemSchema = z.object({
   label: z.string(),
@@ -168,6 +188,13 @@ function CreatorWorkspaceComponent({
     shots: z.infer<typeof shotSchema>[];
   };
 }) {
+  const modelConfig = useContext(DraftModelConfigContext);
+  const initialRequestModel = modelConfig?.defaultModelId ?? props.model;
+  const initialResponseModel = modelConfig
+    ? modelConfig.gatewayConfigured
+      ? initialRequestModel
+      : modelConfig.fallbackModelId
+    : props.model;
   const initialDraft: Draft = {
     title: props.title,
     hook: props.hook,
@@ -182,11 +209,36 @@ function CreatorWorkspaceComponent({
       video_prompt: shot.videoPrompt,
       on_screen_text: shot.text ?? null,
     })),
-    meta: { model: props.model, source: "topic" },
+    meta: { model: initialResponseModel, source: "topic" },
   };
 
   const [topic, setTopic] = useState(props.defaultTopic);
   const [draft, setDraft] = useState<Draft>(initialDraft);
+  const [selectedModel, setSelectedModel] = useState(initialRequestModel);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => [
+    {
+      id: "initial-user",
+      role: "user",
+      body: props.defaultTopic,
+      modelId: initialRequestModel,
+    },
+    {
+      id: "initial-assistant",
+      role: "assistant",
+      body: `${props.hook} ${props.cta}`,
+      modelId: initialResponseModel,
+    },
+  ]);
+  const [traces, setTraces] = useState<DraftTrace[]>(() => [
+    {
+      id: "initial",
+      source: "topic",
+      requestedModel: initialRequestModel,
+      responseModel: initialResponseModel,
+      status: "done",
+      detail: "stored default",
+    },
+  ]);
   const [drafting, setDrafting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stills, setStills] = useState<Record<string, string>>({});
@@ -197,6 +249,7 @@ function CreatorWorkspaceComponent({
     detail?: string;
   }>({ status: "idle" });
   const videoPollRef = useRef<number | null>(null);
+  const submittedDraftRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -206,8 +259,44 @@ function CreatorWorkspaceComponent({
     };
   }, []);
 
+  useEffect(() => {
+    if (!modelConfig || submittedDraftRef.current) return;
+
+    const responseModel = modelConfig.gatewayConfigured
+      ? modelConfig.defaultModelId
+      : modelConfig.fallbackModelId;
+
+    setSelectedModel(modelConfig.defaultModelId);
+    setDraft((current) => ({ ...current, meta: { ...current.meta, model: responseModel } }));
+    setChatMessages((current) =>
+      current.map((message) =>
+        message.id === "initial-user"
+          ? { ...message, modelId: modelConfig.defaultModelId }
+          : message.id === "initial-assistant"
+            ? { ...message, modelId: responseModel }
+            : message
+      )
+    );
+    setTraces((current) =>
+      current.map((trace) =>
+        trace.id === "initial"
+          ? {
+              ...trace,
+              requestedModel: modelConfig.defaultModelId,
+              responseModel,
+            }
+          : trace
+      )
+    );
+  }, [modelConfig]);
+
   async function handleDraft() {
     if (!topic.trim() || drafting) return;
+    const requestedModel = selectedModel || modelConfig?.defaultModelId || props.model;
+    const traceId = `draft-${Date.now()}`;
+    const startedAt = performance.now();
+
+    submittedDraftRef.current = true;
     setDrafting(true);
     setError(null);
     setStills({});
@@ -218,19 +307,78 @@ function CreatorWorkspaceComponent({
       window.clearInterval(videoPollRef.current);
       videoPollRef.current = null;
     }
+    setChatMessages((current) =>
+      [
+        ...current,
+        {
+          id: `${traceId}-user`,
+          role: "user" as const,
+          body: topic,
+          modelId: requestedModel,
+        },
+      ].slice(-6)
+    );
+    setTraces((current) =>
+      [
+        {
+          id: traceId,
+          source: "topic",
+          requestedModel,
+          status: "pending" as const,
+          detail: "/api/draft",
+        },
+        ...current,
+      ].slice(0, 6)
+    );
 
     try {
       const res = await fetch("/api/draft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: "topic", content: topic }),
+        body: JSON.stringify({ source: "topic", content: topic, model: requestedModel }),
       });
       if (!res.ok) throw new Error(`draft failed (${res.status})`);
       const nextDraft = (await res.json()) as Draft;
       setDraft(nextDraft);
+      setChatMessages((current) =>
+        [
+          ...current,
+          {
+            id: `${traceId}-assistant`,
+            role: "assistant" as const,
+            body: `${nextDraft.hook} ${nextDraft.cta}`,
+            modelId: nextDraft.meta.model,
+          },
+        ].slice(-6)
+      );
+      setTraces((current) =>
+        current.map((trace) =>
+          trace.id === traceId
+            ? {
+                ...trace,
+                responseModel: nextDraft.meta.model,
+                status: "done",
+                latencyMs: Math.round(performance.now() - startedAt),
+              }
+            : trace
+        )
+      );
       void renderStills(nextDraft);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "draft failed");
+      const message = e instanceof Error ? e.message : "draft failed";
+      setError(message);
+      setTraces((current) =>
+        current.map((trace) =>
+          trace.id === traceId
+            ? {
+                ...trace,
+                status: "error",
+                latencyMs: Math.round(performance.now() - startedAt),
+                detail: message,
+              }
+            : trace
+        )
+      );
     } finally {
       setDrafting(false);
     }
@@ -326,6 +474,10 @@ function CreatorWorkspaceComponent({
   const totalSeconds = draft.shots.reduce((sum, shot) => sum + shot.duration_s, 0);
   const publishBusy = publishState.status === "publishing";
   const firstStill = stills[draft.shots[0]?.id ?? ""];
+  const modelOptions = modelOptionsWithSelection(modelConfig?.models ?? [], selectedModel);
+  const gatewayStatus = modelConfig?.gatewayConfigured
+    ? "gateway configured"
+    : `fallback ${modelConfig?.fallbackModelId ?? draft.meta.model}`;
 
   return (
     <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -451,9 +603,24 @@ function CreatorWorkspaceComponent({
       </div>
       <aside className="rounded-lg border border-[#ddd4c9] bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Generative prompt</h3>
+          <h3 className="text-sm font-semibold">Chat composer</h3>
           <span className="rounded-full bg-[#f5e6d8] px-2 py-0.5 text-xs text-[#a35d2f]">/api/draft</span>
         </div>
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-[#8d8177]" htmlFor="draft-model">
+          Model
+        </label>
+        <select
+          id="draft-model"
+          value={selectedModel}
+          onChange={(event) => setSelectedModel(event.target.value)}
+          className="mb-3 h-10 w-full rounded-lg border border-[#ddd4c9] bg-[#fbf8f4] px-3 text-sm outline-none focus:border-[#c77842]"
+        >
+          {modelOptions.map((model) => (
+            <option key={model.id} value={model.id}>
+              {modelOptionLabel(model)}
+            </option>
+          ))}
+        </select>
         <textarea
           value={topic}
           onChange={(event) => setTopic(event.target.value)}
@@ -468,23 +635,106 @@ function CreatorWorkspaceComponent({
         </button>
         {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
         <div className="mt-4 space-y-3 border-t border-[#eee5dc] pt-4">
-          <PromptBubble label="User" body={topic} tone="user" />
-          <PromptBubble label="Assistant" body={`${draft.hook} ${draft.cta}`} tone="assistant" />
+          <div className="flex items-center justify-between gap-3">
+            <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8d8177]">Chat history</h4>
+            <span className="max-w-[190px] truncate rounded-full bg-[#f5e6d8] px-2 py-0.5 text-xs text-[#9a582c]">
+              {gatewayStatus}
+            </span>
+          </div>
+          {chatMessages.map((message) => (
+            <PromptBubble
+              key={message.id}
+              label={message.role === "user" ? "User" : "Assistant"}
+              body={message.body}
+              modelId={message.modelId}
+              tone={message.role}
+            />
+          ))}
+        </div>
+        <div className="mt-4 space-y-2 border-t border-[#eee5dc] pt-4">
+          <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8d8177]">Traces</h4>
+          {traces.map((trace) => (
+            <div key={trace.id} className="rounded-lg border border-[#eee5dc] bg-[#fbf8f4] p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-[#221914]">{trace.status}</span>
+                <span className="text-xs text-[#8d8177]">
+                  {trace.latencyMs === undefined ? trace.detail : `${trace.latencyMs}ms`}
+                </span>
+              </div>
+              <TraceModelRow label="request" value={trace.requestedModel} />
+              <TraceModelRow label="response" value={trace.responseModel ?? "pending"} />
+            </div>
+          ))}
         </div>
       </aside>
     </section>
   );
 }
 
-function PromptBubble({ label, body, tone }: { label: string; body: string; tone: "user" | "assistant" }) {
+function PromptBubble({
+  label,
+  body,
+  modelId,
+  tone,
+}: {
+  label: string;
+  body: string;
+  modelId: string;
+  tone: "user" | "assistant";
+}) {
   return (
     <div className={tone === "user" ? "rounded-lg bg-[#c86f33] p-3 text-white" : "rounded-lg bg-[#f0ece7] p-3 text-[#221914]"}>
-      <p className={tone === "user" ? "text-xs font-semibold text-white/70" : "text-xs font-semibold text-[#8d8177]"}>
-        {label}
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className={tone === "user" ? "text-xs font-semibold text-white/70" : "text-xs font-semibold text-[#8d8177]"}>
+          {label}
+        </p>
+        <span
+          className={[
+            "min-w-0 max-w-[170px] truncate rounded-full px-2 py-0.5 text-xs",
+            tone === "user" ? "bg-white/15 text-white/80" : "bg-white text-[#7b6f65]",
+          ].join(" ")}
+          title={modelId}
+        >
+          {modelId}
+        </span>
+      </div>
       <p className="mt-1 text-sm leading-5">{body}</p>
     </div>
   );
+}
+
+function TraceModelRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-2 text-xs">
+      <span className="text-[#8d8177]">{label}</span>
+      <span className="min-w-0 max-w-[230px] truncate font-mono text-[#221914]" title={value}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function modelOptionsWithSelection(models: DraftModelOption[], selectedModel: string) {
+  if (!selectedModel || models.some((model) => model.id === selectedModel)) return models;
+
+  return [
+    {
+      id: selectedModel,
+      label: "Selected",
+      roles: [] as DraftModelOption["roles"],
+      isDefault: false,
+    },
+    ...models,
+  ];
+}
+
+function modelOptionLabel(model: DraftModelOption) {
+  const label = model.roles.length > 0 ? model.roles.map(modelRoleLabel).join(" + ") : model.label;
+  return `${label}: ${model.id}`;
+}
+
+function modelRoleLabel(role: DraftModelOption["roles"][number]) {
+  return role === "pioneer" ? "Pioneer" : "Base";
 }
 
 const PanelGrid = defineComponent({

@@ -15,29 +15,41 @@ export type PublishResult = {
   instagram?: { media_id?: string };
 };
 
-const USER_ID = "ad-factory-demo-user";
+const USER_ID = process.env.COMPOSIO_USER_ID ?? "ad-factory-demo-user";
+const INSTAGRAM_IG_USER_ID = process.env.INSTAGRAM_IG_USER_ID ?? "me";
 
+// Accept either env name: COMPOSIO_API_KEY (canonical) or COMPOSIO_API (alias).
 function getComposioApiKey() {
   return process.env.COMPOSIO_API_KEY ?? process.env.COMPOSIO_API;
 }
 
-function getSession() {
-  return new Composio({ apiKey: getComposioApiKey() }).create(USER_ID);
+// One client, direct tool execution. `composio.create(userId)` returns a Tool
+// Router (MCP/agent) session, which is the wrong tool for a deterministic one-shot publish.
+// `composio.tools.execute(slug, { userId, arguments })` is the documented path.
+function getClient() {
+  return new Composio({ apiKey: getComposioApiKey() });
 }
 
 async function publishToTikTok(input: PublishInput): Promise<PublishResult["tiktok"]> {
   if (!input.videoUrl) return undefined;
 
-  const session = await getSession();
+  const composio = getClient();
   const caption = `${input.hook}\n\n${input.cta}`.slice(0, 2200);
 
-  const result = await session.execute("TIKTOK_PUBLISH_VIDEO", {
-    video_url: input.videoUrl,
-    caption,
-    privacy_level: "SELF_ONLY",
-    disable_duet: false,
-    disable_stitch: false,
-    disable_comment: false,
+  const result = await composio.tools.execute("TIKTOK_PUBLISH_VIDEO", {
+    userId: USER_ID,
+    // @composio/core@0.10 throws ComposioToolVersionRequiredError when the
+    // toolkit version resolves to "latest". Skip the gate for the demo; pin a
+    // version (or set COMPOSIO_TOOLKIT_VERSION_TIKTOK) for production.
+    dangerouslySkipVersionCheck: true,
+    arguments: {
+      video_url: input.videoUrl,
+      caption,
+      privacy_level: "SELF_ONLY",
+      disable_duet: false,
+      disable_stitch: false,
+      disable_comment: false,
+    },
   });
 
   if (result.error) throw new Error(`TikTok: ${result.error}`);
@@ -50,16 +62,23 @@ async function publishToInstagram(input: PublishInput): Promise<PublishResult["i
   const mediaUrl = input.videoUrl ?? input.imageUrl;
   if (!mediaUrl) return undefined;
 
-  const session = await getSession();
+  const composio = getClient();
   const caption = `${input.hook}\n\n${input.cta}`.slice(0, 2200);
   const isVideo = !!input.videoUrl;
 
-  const containerResult = await session.execute(
-    "INSTAGRAM_POST_IG_USER_MEDIA",
-    isVideo
-      ? { media_type: "REELS", video_url: mediaUrl, caption, share_to_feed: true }
-      : { image_url: mediaUrl, caption }
-  );
+  const containerResult = await composio.tools.execute("INSTAGRAM_POST_IG_USER_MEDIA", {
+    userId: USER_ID,
+    dangerouslySkipVersionCheck: true,
+    arguments: isVideo
+      ? {
+          ig_user_id: INSTAGRAM_IG_USER_ID,
+          media_type: "REELS",
+          video_url: mediaUrl,
+          caption,
+          share_to_feed: true,
+        }
+      : { ig_user_id: INSTAGRAM_IG_USER_ID, image_url: mediaUrl, caption },
+  });
 
   if (containerResult.error) throw new Error(`Instagram container: ${containerResult.error}`);
 
@@ -71,8 +90,10 @@ async function publishToInstagram(input: PublishInput): Promise<PublishResult["i
 
   if (!creation_id) throw new Error("Instagram: no creation_id returned");
 
-  const publishResult = await session.execute("INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH", {
-    creation_id,
+  const publishResult = await composio.tools.execute("INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH", {
+    userId: USER_ID,
+    dangerouslySkipVersionCheck: true,
+    arguments: { ig_user_id: INSTAGRAM_IG_USER_ID, creation_id },
   });
 
   if (publishResult.error) throw new Error(`Instagram publish: ${publishResult.error}`);

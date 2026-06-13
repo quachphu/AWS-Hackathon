@@ -1,12 +1,6 @@
 import { NextResponse } from "next/server";
-import {
-  ANALYTICS_OPENUI_PROGRAM,
-  DEFAULT_OPENUI_PROGRAM,
-  DEV_LOOP_OPENUI_PROGRAM,
-  openUiProgramForPrompt,
-} from "@/lib/openui/programs";
-
-type ProgramMode = "default" | "analytics" | "dev";
+import { getDraftModelConfig } from "@/lib/gateway/models";
+import { buildOpenUiPrograms, openUiProgramForPrompt } from "@/lib/openui/programs";
 
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as { prompt?: string };
@@ -16,13 +10,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "prompt is required" }, { status: 400 });
   }
 
-  const response = openUiProgramForPrompt(prompt);
-  return NextResponse.json({ response, mode: modeForProgram(response) });
-}
+  const modelConfig = getDraftModelConfig();
+  const programs = buildOpenUiPrograms(modelConfig);
+  const { response, mode } = openUiProgramForPrompt(prompt, programs);
 
-function modeForProgram(response: string): ProgramMode {
-  if (response === ANALYTICS_OPENUI_PROGRAM) return "analytics";
-  if (response === DEV_LOOP_OPENUI_PROGRAM) return "dev";
-  if (response === DEFAULT_OPENUI_PROGRAM) return "default";
-  return "default";
+  return NextResponse.json({ response, mode, modelConfig });
 }
